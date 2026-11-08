@@ -104,6 +104,7 @@ typedef struct GameDialogOptionEntry {
     int btn;
     int field_14;
     char text[900];
+    int bottom; // controller: fine del testo della risposta
 } GameDialogOptionEntry;
 
 typedef struct GameDialogBlock {
@@ -589,6 +590,38 @@ int gdialog_exit()
 bool dialog_active()
 {
     return dialog_state_fix != 0;
+}
+
+// Controller: centri (in coordinate schermo) delle risposte visibili, per
+// spostare il cursore da una risposta all'altra con la croce direzionale.
+int gameDialogGetOptionTargets(int* xs, int* ys, int max)
+{
+    if (!dialog_active() || gOptionWin == -1) {
+        return 0;
+    }
+
+    Rect windowRect;
+    if (win_get_rect(gOptionWin, &windowRect) == -1) {
+        return 0;
+    }
+
+    int count = 0;
+    for (int index = 0; index < gdNumOptions && count < max; index++) {
+        GameDialogOptionEntry* optionEntry = &(dialogBlock.options[index]);
+        if (optionEntry->btn == -1) {
+            continue;
+        }
+
+        if (optionEntry->bottom <= optionEntry->field_14 || optionEntry->bottom > GAME_DIALOG_OPTIONS_WINDOW_HEIGHT) {
+            continue;
+        }
+
+        xs[count] = windowRect.ulx + 40;
+        ys[count] = windowRect.uly + (optionEntry->field_14 + optionEntry->bottom) / 2;
+        count++;
+    }
+
+    return count;
 }
 
 // 0x43DE28
@@ -1836,6 +1869,7 @@ static void gDialogProcessUpdate()
                 393,
                 color);
 
+            dialogOptionEntry->bottom = optionRect.uly;
             optionRect.uly += 2;
 
             int max_y;

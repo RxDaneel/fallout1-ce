@@ -7,6 +7,7 @@
 #include "plib/gnw/memory.h"
 #include "plib/gnw/svga.h"
 #include "plib/gnw/touch.h"
+#include "game/gamepad.h"
 #include "plib/gnw/vcr.h"
 
 namespace fallout {
@@ -433,6 +434,77 @@ void mouse_info()
         static int prevx;
         static int prevy;
 
+        // Modo "diretto": il cursore va dove tocchi. Lo spostamento iniziale
+        // dovuto all'aggancio di un oggetto viene mantenuto per tutto il gesto.
+        static int snapOffsetX;
+        static int snapOffsetY;
+        static bool longPressBlocked;
+
+        if (touchDirectModeEnabled()) {
+            int cursorX;
+            int cursorY;
+            mouse_get_position(&cursorX, &cursorY);
+
+            switch (gesture.type) {
+            case kTap:
+                if (gesture.numberOfTouches == 1) {
+                    int x = gesture.x;
+                    int y = gesture.y;
+                    if (touchSnapEnabled()) {
+                        gamepadSnapPoint(&x, &y);
+                    }
+                    bool click = gamepadSmartClick(x, y);
+                    mouse_simulate_input(x - cursorX, y - cursorY, click ? MOUSE_STATE_LEFT_BUTTON_DOWN : 0);
+                } else if (gesture.numberOfTouches == 2) {
+                    mouse_simulate_input(0, 0, MOUSE_STATE_RIGHT_BUTTON_DOWN);
+                }
+                break;
+            case kLongPress:
+            case kPan:
+                if (gesture.state == kBegan) {
+                    prevx = gesture.x;
+                    prevy = gesture.y;
+                    snapOffsetX = 0;
+                    snapOffsetY = 0;
+                    longPressBlocked = false;
+                    if (gesture.type == kLongPress && gesture.numberOfTouches == 1) {
+                        int x = gesture.x;
+                        int y = gesture.y;
+                        if (touchSnapEnabled() && gamepadSnapPoint(&x, &y)) {
+                            snapOffsetX = x - gesture.x;
+                            snapOffsetY = y - gesture.y;
+                        }
+                        // Tenere premuto su un oggetto apre il menu azioni:
+                        // serve il cursore "usa".
+                        longPressBlocked = !gamepadSmartClick(x, y);
+                    }
+                }
+
+                if (gesture.numberOfTouches == 1) {
+                    int buttons = gesture.type == kLongPress && gesture.state != kEnded && !longPressBlocked ? MOUSE_STATE_LEFT_BUTTON_DOWN : 0;
+                    mouse_simulate_input(gesture.x + snapOffsetX - cursorX, gesture.y + snapOffsetY - cursorY, buttons);
+                } else if (gesture.numberOfTouches == 2) {
+                    if (gesture.type == kLongPress) {
+                        mouse_simulate_input(0, 0, gesture.state != kEnded ? MOUSE_STATE_RIGHT_BUTTON_DOWN : 0);
+                    } else {
+                        gMouseWheelX = (prevx - gesture.x) / 2;
+                        gMouseWheelY = (gesture.y - prevy) / 2;
+
+                        if (gMouseWheelX != 0 || gMouseWheelY != 0) {
+                            mouse_buttons |= MOUSE_EVENT_WHEEL;
+                            raw_buttons |= MOUSE_EVENT_WHEEL;
+                        }
+                    }
+                }
+
+                prevx = gesture.x;
+                prevy = gesture.y;
+                break;
+            }
+
+            return;
+        }
+
         switch (gesture.type) {
         case kTap:
             if (gesture.numberOfTouches == 1) {
@@ -513,12 +585,23 @@ void mouse_info()
         buttons = last_buttons;
     }
 
+    // Controller: si somma al mouse (si possono usare entrambi).
+    int padX;
+    int padY;
+    int padButtons;
+    int padWheelX;
+    int padWheelY;
+    gamepadGetMouseInput(&padX, &padY, &padButtons, &padWheelX, &padWheelY);
+    x += padX;
+    y += padY;
+    buttons |= padButtons;
+
     mouse_simulate_input(x, y, buttons);
 
     // TODO: Move to `_mouse_simulate_input`.
     // TODO: Record wheel event in VCR.
-    gMouseWheelX = mouseData.wheelX;
-    gMouseWheelY = mouseData.wheelY;
+    gMouseWheelX = mouseData.wheelX + padWheelX;
+    gMouseWheelY = mouseData.wheelY + padWheelY;
 
     if (gMouseWheelX != 0 || gMouseWheelY != 0) {
         mouse_buttons |= MOUSE_EVENT_WHEEL;

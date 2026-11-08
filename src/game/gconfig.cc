@@ -12,6 +12,11 @@ namespace fallout {
 // 0x504FD8
 static bool gconfig_initialized = false;
 
+bool gconfig_is_initialized()
+{
+    return gconfig_initialized;
+}
+
 // fallout.cfg
 //
 // 0x58CC20

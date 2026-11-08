@@ -89,6 +89,8 @@ target_sources(${EXECUTABLE_NAME} PUBLIC
     "src/game/gdialog.h"
     "src/game/gmemory.cc"
     "src/game/gmemory.h"
+    "src/game/gamepad.cc"
+    "src/game/gamepad.h"
     "src/game/gmouse.cc"
     "src/game/gmouse.h"
     "src/game/gmovie.cc"

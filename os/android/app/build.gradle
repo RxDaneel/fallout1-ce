@@ -68,7 +68,12 @@ android {
 
             // Release signing config is optional and might not be present in CI
             // builds, hence `findByName`.
-            signingConfig signingConfigs.findByName('release')
+            // Controlli mobile: senza chiave di release si firma con la chiave
+            // di debug, così l'APK ottimizzato si installa direttamente.
+            signingConfig signingConfigs.findByName('release') ?: signingConfigs.debug
+
+            // Nome diverso dalla versione ufficiale: si possono tenere entrambe.
+            applicationIdSuffix '.controlli'
         }
     }
 

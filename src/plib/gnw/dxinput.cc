@@ -17,6 +17,9 @@ bool dxinput_init()
         return false;
     }
 
+    // Controller: se non è disponibile il gioco funziona lo stesso.
+    SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
+
     if (!dxinput_mouse_init()) {
         goto err;
     }

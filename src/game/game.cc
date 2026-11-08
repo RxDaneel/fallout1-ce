@@ -1,5 +1,7 @@
 #include "game/game.h"
 
+#include "game/gamepad.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -427,6 +429,8 @@ void game_exit()
 // 0x43B748
 int game_handle_input(int eventCode, bool isInCombatMode)
 {
+    gamepadGameTick(isInCombatMode);
+
     // NOTE: Uninline.
     if (game_state() == GAME_STATE_5) {
         dialogue_system_enter();

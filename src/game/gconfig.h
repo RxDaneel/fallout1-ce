@@ -115,6 +115,8 @@ typedef enum TargetHighlight {
 
 extern Config game_config;
 
+bool gconfig_is_initialized();
+
 bool gconfig_init(bool isMapper, int argc, char** argv);
 bool gconfig_save();
 bool gconfig_exit(bool shouldSave);

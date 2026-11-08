@@ -55,6 +55,8 @@ int main(int argc, char* argv[])
 #if __ANDROID__
     SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+    // Il tasto Indietro di Android diventa Esc invece di chiudere il gioco.
+    SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
     chdir(SDL_AndroidGetExternalStoragePath());
 #endif
 

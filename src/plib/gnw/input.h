@@ -50,6 +50,7 @@ void GNW95_process_message();
 void GNW95_clear_time_stamps();
 void GNW95_lost_focus();
 
+void inputInjectKey(int scancode, bool down);
 void beginTextInput();
 void endTextInput();
 

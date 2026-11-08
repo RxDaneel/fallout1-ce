@@ -56,6 +56,28 @@ static int find_unused_touch_index()
     return -1;
 }
 
+// Coordinate del dito -> coordinate del gioco, tenendo conto delle bande
+// nere quando il formato dello schermo è diverso da quello del gioco.
+static TouchLocation touch_to_screen(float nx, float ny)
+{
+    TouchLocation location;
+    location.x = static_cast<int>(nx * screenGetWidth());
+    location.y = static_cast<int>(ny * screenGetHeight());
+
+    if (gSdlWindow != nullptr && gSdlRenderer != nullptr) {
+        int windowWidth;
+        int windowHeight;
+        SDL_GetWindowSize(gSdlWindow, &windowWidth, &windowHeight);
+        float logicalX;
+        float logicalY;
+        SDL_RenderWindowToLogical(gSdlRenderer, (int)(nx * windowWidth), (int)(ny * windowHeight), &logicalX, &logicalY);
+        location.x = std::clamp(static_cast<int>(logicalX), 0, screenGetWidth() - 1);
+        location.y = std::clamp(static_cast<int>(logicalY), 0, screenGetHeight() - 1);
+    }
+
+    return location;
+}
+
 static TouchLocation touch_get_start_location_centroid(int* indexes, int length)
 {
     TouchLocation centroid;
@@ -99,8 +121,7 @@ void touch_handle_start(SDL_TouchFingerEvent* event)
         touch->used = true;
         touch->fingerId = event->fingerId;
         touch->startTimestamp = event->timestamp;
-        touch->startLocation.x = static_cast<int>(event->x * screenGetWidth());
-        touch->startLocation.y = static_cast<int>(event->y * screenGetHeight());
+        touch->startLocation = touch_to_screen(event->x, event->y);
         touch->currentTimestamp = touch->startTimestamp;
         touch->currentLocation = touch->startLocation;
         touch->phase = TOUCH_PHASE_BEGAN;
@@ -113,8 +134,7 @@ void touch_handle_move(SDL_TouchFingerEvent* event)
     if (index != -1) {
         Touch* touch = &(touches[index]);
         touch->currentTimestamp = event->timestamp;
-        touch->currentLocation.x = static_cast<int>(event->x * screenGetWidth());
-        touch->currentLocation.y = static_cast<int>(event->y * screenGetHeight());
+        touch->currentLocation = touch_to_screen(event->x, event->y);
         touch->phase = TOUCH_PHASE_MOVED;
     }
 }
@@ -125,8 +145,7 @@ void touch_handle_end(SDL_TouchFingerEvent* event)
     if (index != -1) {
         Touch* touch = &(touches[index]);
         touch->currentTimestamp = event->timestamp;
-        touch->currentLocation.x = static_cast<int>(event->x * screenGetWidth());
-        touch->currentLocation.y = static_cast<int>(event->y * screenGetHeight());
+        touch->currentLocation = touch_to_screen(event->x, event->y);
         touch->phase = TOUCH_PHASE_ENDED;
     }
 }
