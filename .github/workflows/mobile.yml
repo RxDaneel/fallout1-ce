@@ -27,7 +27,17 @@ jobs:
       - name: Build
         run: |
           cd os/android
-          # Il download di Gradle è lento: alza il timeout (predefinito 10 s).
+          # Il wrapper di Gradle non riesce a scaricare la 7.3.3 (timeout/504):
+          # la scarico con curl, con più tentativi e due server, e la passo al
+          # wrapper come file locale.
+          for url in \
+            https://services.gradle.org/distributions/gradle-7.3.3-bin.zip \
+            https://downloads.gradle.org/distributions/gradle-7.3.3-bin.zip \
+            https://github.com/gradle/gradle-distributions/releases/download/v7.3.3/gradle-7.3.3-bin.zip; do
+            curl -fL --retry 8 --retry-all-errors --retry-delay 15 --connect-timeout 30 -o /tmp/gradle.zip "$url" && break
+          done
+          test -s /tmp/gradle.zip
+          sed -i 's|^distributionUrl=.*|distributionUrl=file\\:///tmp/gradle.zip|' gradle/wrapper/gradle-wrapper.properties
           echo "networkTimeout=300000" >> gradle/wrapper/gradle-wrapper.properties
           # Riprova: il download di Gradle a volte va in timeout.
           n=0
