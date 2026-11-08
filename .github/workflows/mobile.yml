@@ -27,12 +27,14 @@ jobs:
       - name: Build
         run: |
           cd os/android
+          # Il download di Gradle è lento: alza il timeout (predefinito 10 s).
+          echo "networkTimeout=300000" >> gradle/wrapper/gradle-wrapper.properties
           # Riprova: il download di Gradle a volte va in timeout.
           n=0
           until ./gradlew assembleRelease; do
             n=$((n+1))
             if [ $n -ge 3 ]; then exit 1; fi
-            sleep 30
+            sleep 60
           done
 
       - name: Upload
@@ -45,6 +47,9 @@ jobs:
   ios:
     name: iOS
     runs-on: macos-latest
+    env:
+      # CMake 4 rifiuta i progetti che dichiarano versioni minime < 3.5 (SDL 2.26).
+      CMAKE_POLICY_VERSION_MINIMUM: "3.5"
     steps:
       - name: Clone
         uses: actions/checkout@v4
