@@ -27,7 +27,13 @@ jobs:
       - name: Build
         run: |
           cd os/android
-          ./gradlew assembleRelease
+          # Riprova: il download di Gradle a volte va in timeout.
+          n=0
+          until ./gradlew assembleRelease; do
+            n=$((n+1))
+            if [ $n -ge 3 ]; then exit 1; fi
+            sleep 30
+          done
 
       - name: Upload
         uses: actions/upload-artifact@v4
@@ -38,7 +44,7 @@ jobs:
 
   ios:
     name: iOS
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - name: Clone
         uses: actions/checkout@v4
