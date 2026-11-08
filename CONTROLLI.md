@@ -45,8 +45,9 @@ LB/RB (puoi scegliere anche te stesso, per il pronto soccorso) e premi A.
 | B | Annulla la scelta |
 | X | Cambia cursore (movimento / attacco / usa) |
 | R3 | Modalità d'attacco (es. colpo mirato: la parte del corpo si sceglie con la croce) |
-| RT | Fine turno |
-| Select + RT | Termina il combattimento |
+| RT (tocco) | Fine turno |
+| RT (tenuto premuto) | Termina il combattimento (se non ci sono nemici vicini) |
+| Select + RT | Termina il combattimento (alternativa) |
 | Stick destro | Sposta la visuale |
 | Y | Inventario (per usare oggetti o cambiare arma) |
 

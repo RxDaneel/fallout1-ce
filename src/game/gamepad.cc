@@ -17,18 +17,18 @@
 #include "game/config.h"
 #include "game/critter.h"
 #include "game/display.h"
-#include "game/editor.h"
 #include "game/game.h"
 #include "game/gconfig.h"
 #include "game/gdialog.h"
+#include "game/editor.h"
 #include "game/gmouse.h"
 #include "game/intface.h"
 #include "game/loadsave.h"
 #include "game/map.h"
 #include "game/object.h"
 #include "game/party.h"
-#include "game/protinst.h"
 #include "game/proto.h"
+#include "game/protinst.h"
 #include "game/skill_defs.h"
 #include "game/tile.h"
 #include "game/worldmap.h"
@@ -162,6 +162,7 @@ static Object* gTargetCurrent = nullptr;
 
 // Modalità senza puntatore (controller sulla mappa).
 static bool gPadMode = false; // ultimo input dal controller
+static Uint32 gLastPadInput = 0;
 static Object* gFocus = nullptr; // oggetto evidenziato
 static bool gFocusManual = false; // scelto con LB/RB: resta finché non ti muovi
 static bool gFocusOutlined = false;
@@ -592,6 +593,11 @@ static void bindingRelease(int slot)
 static bool gSelectUsedAsModifier = false;
 static bool gTriggerDown[2] = { false, false };
 
+// RT in combattimento: tocco = fine turno, tenuto premuto = fine combattimento.
+static Uint32 gEndTurnHeldSince = 0;
+static bool gEndCombatSent = false;
+static const Uint32 kEndCombatHoldMs = 600;
+
 void gamepadHandleEvent(SDL_Event* event)
 {
     switch (event->type) {
@@ -603,6 +609,7 @@ void gamepadHandleEvent(SDL_Event* event)
         break;
     case SDL_CONTROLLERBUTTONDOWN:
         gPadMode = true;
+        gLastPadInput = SDL_GetTicks();
         if (gMenuHold && (event->cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_UP || event->cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_DOWN)) {
             gMenuStep += event->cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_UP ? -1 : 1;
             break;
@@ -648,6 +655,7 @@ void gamepadHandleEvent(SDL_Event* event)
         gAxis[event->caxis.axis] = event->caxis.value;
         if (abs(event->caxis.value) > 12000) {
             gPadMode = true;
+            gLastPadInput = SDL_GetTicks();
         }
 
         if (event->caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || event->caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) {
@@ -660,12 +668,24 @@ void gamepadHandleEvent(SDL_Event* event)
                 if (gSelectHeld && right && (currentContext() == CONTEXT_COMBAT)) {
                     binding = keyTap(SDL_SCANCODE_RETURN); // termina combattimento
                     gSelectUsedAsModifier = true;
+                } else if (right && currentContext() == CONTEXT_COMBAT) {
+                    // Decide al rilascio (o dopo un attimo se resta premuto).
+                    gEndTurnHeldSince = SDL_GetTicks();
+                    gEndCombatSent = false;
                 } else {
                     binding = triggerBindingFor(right, currentContext());
                 }
                 bindingPress(slot, binding);
             } else if (gTriggerDown[right] && event->caxis.value < 8000) {
                 gTriggerDown[right] = false;
+                if (right && gEndTurnHeldSince != 0) {
+                    if (!gEndCombatSent && currentContext() == CONTEXT_COMBAT) {
+                        inputInjectKey(SDL_SCANCODE_SPACE, true);
+                        inputInjectKey(SDL_SCANCODE_SPACE, false);
+                    }
+                    gEndTurnHeldSince = 0;
+                    gEndCombatSent = false;
+                }
                 bindingRelease(slot);
             }
         }
@@ -1876,9 +1896,9 @@ static int stickTargetTile(double nx, double ny)
     dudeX += 16;
     dudeY += 8;
 
-    // Prova a 4, 3, 2 esagoni di distanza; la griglia isometrica è
+    // Prova a 6, 5, 4, 3, 2 esagoni di distanza (tratti lunghi = meno ripartenze); la griglia isometrica è
     // schiacciata in verticale, quindi la componente y vale meno.
-    static const int distances[] = { 128, 96, 64, 40 };
+    static const int distances[] = { 192, 160, 128, 96, 64, 40 };
     for (int distance : distances) {
         int x = dudeX + (int)(nx * distance);
         int y = dudeY + (int)(ny * distance * 0.75);
@@ -1911,6 +1931,11 @@ static void issueMove(int tile, bool run)
     register_end();
 }
 
+// Visuale che segue il personaggio con passi piccoli e continui (come lo
+// scorrimento ai bordi del gioco) invece di un salto di un quarto di schermo:
+// niente scatti quando si passa da una zona all'altra della mappa.
+static Uint32 gFollowUntil = 0;
+
 static void followCamera()
 {
     if (!gMobile.cameraFollow) {
@@ -1927,12 +1952,33 @@ static void followCamera()
     if (tile_coord(obj_dude->tile, &x, &y, obj_dude->elevation) == -1) {
         return;
     }
+    x += 16;
+    y += 8;
 
     int width = view.lrx - view.ulx;
     int height = view.lry - view.uly;
-    if (x < view.ulx + width / 4 || x > view.lrx - width / 4
-        || y < view.uly + height / 4 || y > view.lry - height / 4) {
+    int dx = x - (view.ulx + width / 2);
+    int dy = y - (view.uly + height / 2);
+    int deadX = width / 7;
+    int deadY = height / 7;
+
+    int stepX = dx > deadX ? 1 : (dx < -deadX ? -1 : 0);
+    int stepY = dy > deadY ? 1 : (dy < -deadY ? -1 : 0);
+    if (stepX == 0 && stepY == 0) {
+        return;
+    }
+
+    // Personaggio uscito del tutto dalla vista (cambio piano, teletrasporto):
+    // lì conviene ricentrare subito.
+    if (abs(dx) > width / 2 || abs(dy) > height / 2) {
         tile_scroll_to(obj_dude->tile, 2);
+        return;
+    }
+
+    bool wasVisible = gmouse_3d_is_on();
+    map_scroll(stepX, stepY);
+    if (wasVisible && !gmouse_3d_is_on()) {
+        gmouse_3d_on();
     }
 }
 
@@ -1975,7 +2021,7 @@ static void stickMovementTick()
     }
 
     bool directionChanged = angleDelta > 0.6; // ~35 gradi
-    bool nearTarget = gStickLastTarget == -1 || tile_dist(obj_dude->tile, gStickLastTarget) <= 2;
+    bool nearTarget = gStickLastTarget == -1 || tile_dist(obj_dude->tile, gStickLastTarget) <= 3;
     bool idle = !anim_busy(obj_dude);
     bool gaitChanged = run != gStickRunning;
 
@@ -1991,7 +2037,7 @@ static void stickMovementTick()
     }
 
     gStickWasMoving = true;
-    followCamera();
+    gFollowUntil = now + 1500;
 }
 
 // Toglie l'evidenziazione controllando prima che l'oggetto sia ancora sulla
@@ -2036,6 +2082,28 @@ void gamepadGameTick(bool isInCombatMode)
         gPendingLook = false;
         return;
     }
+
+    if (gEndTurnHeldSince != 0 && !gEndCombatSent && SDL_GetTicks() - gEndTurnHeldSince >= kEndCombatHoldMs) {
+        gEndCombatSent = true;
+        if (isInCombatMode) {
+            inputInjectKey(SDL_SCANCODE_RETURN, true);
+            inputInjectKey(SDL_SCANCODE_RETURN, false);
+        }
+    }
+
+    // Fine combattimento: si torna all'esplorazione col controller, senza
+    // esagono rosso né mirino rimasti appesi.
+    static bool wasInCombat = false;
+    if (wasInCombat && !isInCombatMode) {
+        gCombatHex = -1;
+        gCombatStickActive = false;
+        gTargetCurrent = nullptr;
+        gWarpPending = false;
+        if (gLastPadInput != 0 && SDL_GetTicks() - gLastPadInput < 60000) {
+            gPadMode = true;
+        }
+    }
+    wasInCombat = isInCombatMode;
 
     bool pointerless = gPadMode && !isInCombatMode;
 
@@ -2113,6 +2181,12 @@ void gamepadGameTick(bool isInCombatMode)
 
     if (!isInCombatMode && gMobile.stickMovement && !game_ui_is_disabled()) {
         stickMovementTick();
+        if (SDL_GetTicks() < gFollowUntil) {
+            if (anim_busy(obj_dude)) {
+                gFollowUntil = SDL_GetTicks() + 300;
+            }
+            followCamera();
+        }
     } else {
         gStickWasMoving = false;
         gStickLastTarget = -1;
