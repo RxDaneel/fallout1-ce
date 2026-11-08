@@ -10,26 +10,36 @@ Il controller cambia comportamento in base a dove sei: sulla mappa, in
 combattimento, in un dialogo o in un menu (inventario, Pip-Boy, scheda
 personaggio, mappa del mondo).
 
-### Sulla mappa (esplorazione)
+### Sulla mappa (esplorazione) — senza puntatore
+
+Appena usi il controller il cursore sparisce. Il gioco evidenzia da solo
+(contorno giallo) l'oggetto o la persona più vicina nella direzione in cui ti
+muovi, e ne scrive il nome nella console.
 
 | Comando | Azione |
 |---|---|
 | Stick sinistro | Muove il personaggio (a fondo corsa corre) |
-| Stick destro | Cursore |
-| A | Clic intelligente: su un oggetto lo usa, parla, raccoglie; sul pavimento cammina. Tieni premuto per il menu azioni |
-| B | Annulla: torna al cursore di movimento |
-| X | Cambia cursore (movimento / usa / mira), come il tasto destro |
+| Stick destro | Sposta la visuale |
+| A | Azione sull'oggetto evidenziato: parla, apri, perquisisci, raccogli |
+| A tenuto premuto | Menu azioni del gioco (guarda, usa, oggetto, abilità...); croce ↑↓ per scegliere, rilascia A per confermare |
+| X | Esamina l'oggetto evidenziato |
+| LB / RB | Evidenzia l'oggetto precedente / successivo attorno a te |
+| B | Annulla (es. un'abilità scelta dallo Skilldex) |
 | Y | Inventario |
-| LB / RB | Aggancia l'oggetto interattivo precedente / successivo attorno al personaggio |
 | LT | Cambia mano attiva |
 | RT | Inizia il combattimento |
 | Croce ↑ ↓ ← → | Pip-Boy, Personaggio, Abilità (Skilldex), Automappa |
 | L3 | Centra la visuale sul personaggio |
 | R3 | Cambia modalità d'attacco dell'arma |
 | Start | Menu di gioco |
-| Select + A | Salvataggio rapido |
-| Select + Y | Caricamento rapido |
+| Select + A / Y | Salvataggio / caricamento rapido |
 | Select + ↑ | Riposa (orologio del Pip-Boy) |
+
+Abilità: scegli l'abilità dallo Skilldex (croce ←), evidenzia il bersaglio con
+LB/RB (in questa modalità puoi scegliere anche te stesso, per il pronto
+soccorso) e premi A.
+
+Se tocchi lo schermo o muovi un mouse il cursore ricompare.
 
 ### In combattimento
 

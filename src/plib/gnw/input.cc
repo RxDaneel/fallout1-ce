@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "audio_engine.h"
+#include "game/autotest.h"
 #include "game/gamepad.h"
 #include "platform_compat.h"
 #include "plib/color/color.h"
@@ -1082,6 +1083,10 @@ void GNW95_input_exit()
 // 0x4B4538
 void GNW95_process_message()
 {
+#ifdef FALLOUT_AUTOTEST
+    autotestTick();
+#endif
+
     // We need to process event loop even if program is not active or keyboard
     // is disabled, because if we ignore it, we'll never be able to reactivate
     // it again.

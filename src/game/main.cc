@@ -125,7 +125,16 @@ int gnw_main(int argc, char** argv)
                 if (select_character() == 2) {
                     gmovie_play(MOVIE_OVRINTRO, GAME_MOVIE_STOP_MUSIC);
                     roll_set_seed(-1);
+#ifdef FALLOUT_AUTOTEST
+                    // Banco di prova: mappa iniziale scelta dallo script.
+                    if (getenv("FALLOUT_START_MAP") != nullptr && getenv("FALLOUT_START_MAP")[0] != '\0') {
+                        main_load_new((char*)getenv("FALLOUT_START_MAP"));
+                    } else {
+                        main_load_new(mainMap);
+                    }
+#else
                     main_load_new(mainMap);
+#endif
                     main_game_loop();
                     palette_fade_to(white_palette);
 

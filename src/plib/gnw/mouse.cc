@@ -7,6 +7,7 @@
 #include "plib/gnw/memory.h"
 #include "plib/gnw/svga.h"
 #include "plib/gnw/touch.h"
+#include "game/autotest.h"
 #include "game/gamepad.h"
 #include "plib/gnw/vcr.h"
 
@@ -328,6 +329,22 @@ static void mouse_anim()
     }
 }
 
+// Controller senza puntatore: il cursore resta attivo (posizione, clic,
+// cosa c'è sotto) ma non viene disegnato.
+static bool gMouseCursorInvisible = false;
+
+void mouseSetCursorInvisible(bool invisible)
+{
+    if (gMouseCursorInvisible == invisible) {
+        return;
+    }
+    gMouseCursorInvisible = invisible;
+    if (have_mouse && !mouse_is_hidden) {
+        mouse_hide();
+        mouse_show();
+    }
+}
+
 // 0x4B4B88
 void mouse_show()
 {
@@ -341,7 +358,7 @@ void mouse_show()
 
     v2 = mouse_buf;
     if (have_mouse) {
-        if (!mouse_blit_trans || !mouse_is_hidden) {
+        if (!mouse_blit_trans || !mouse_is_hidden || gMouseCursorInvisible) {
             win_get_mouse_buf(mouse_buf);
             v2 = mouse_buf;
             v3 = 0;
@@ -349,7 +366,7 @@ void mouse_show()
             for (i = 0; i < mouse_length; i++) {
                 for (v4 = 0; v4 < mouse_width; v4++) {
                     v6 = mouse_shape[i * mouse_full + v4];
-                    if (v6 != mouse_trans) {
+                    if (v6 != mouse_trans && !gMouseCursorInvisible) {
                         v2[v3] = v6;
                     }
                     v3++;
@@ -384,7 +401,7 @@ void mouse_show()
         }
 
         mouse_buf = v2;
-        if (mouse_blit_trans && mouse_is_hidden) {
+        if (mouse_blit_trans && mouse_is_hidden && !gMouseCursorInvisible) {
             mouse_blit_trans(mouse_shape, mouse_full, mouse_length, v7, v9, v8, v10, v7 + mouse_x, v9 + mouse_y, mouse_trans);
         } else {
             mouse_blit(mouse_buf, mouse_width, mouse_length, v7, v9, v8, v10, v7 + mouse_x, v9 + mouse_y);
@@ -431,6 +448,8 @@ void mouse_info()
 
     Gesture gesture;
     if (touch_get_gesture(&gesture)) {
+        gamepadPointerUsed();
+
         static int prevx;
         static int prevy;
 
@@ -585,6 +604,11 @@ void mouse_info()
         buttons = last_buttons;
     }
 
+    // Mouse vero: esce dalla modalità senza puntatore del controller.
+    if (x != 0 || y != 0 || buttons != 0) {
+        gamepadPointerUsed();
+    }
+
     // Controller: si somma al mouse (si possono usare entrambi).
     int padX;
     int padY;
@@ -595,6 +619,16 @@ void mouse_info()
     x += padX;
     y += padY;
     buttons |= padButtons;
+
+#ifdef FALLOUT_AUTOTEST
+    int testX;
+    int testY;
+    int testButtons;
+    autotestGetMouseInput(&testX, &testY, &testButtons);
+    x += testX;
+    y += testY;
+    buttons |= testButtons;
+#endif
 
     mouse_simulate_input(x, y, buttons);
 

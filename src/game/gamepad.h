@@ -24,6 +24,9 @@ void gamepadGetMouseInput(int* dx, int* dy, int* buttons, int* wheelX, int* whee
 // cicli principali (esplorazione e combattimento).
 void gamepadGameTick(bool isInCombatMode);
 
+// Il giocatore ha usato mouse o tocco: esce dalla modalità senza puntatore.
+void gamepadPointerUsed();
+
 // Impostazioni [mobile] di fallout.cfg.
 bool touchDirectModeEnabled();
 bool touchSnapEnabled();
