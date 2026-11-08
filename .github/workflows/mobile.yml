@@ -56,3 +56,30 @@ jobs:
           name: fallout-ce-ios-controlli
           path: build/fallout-ce.ipa
           retention-days: 30
+
+  release:
+    name: Pubblica
+    needs: [android, ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p out
+          cp dist/fallout-ce-android-controlli/*.apk out/fallout-ce-controlli-android.apk
+          cp dist/fallout-ce-ios-controlli/*.ipa out/fallout-ce-controlli-ios.ipa
+          gh release delete controlli-latest --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create controlli-latest out/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "Controlli mobile (ultima build)" \
+            --notes "Versione con controller e tocco diretto. Vedi CONTROLLI.md."
