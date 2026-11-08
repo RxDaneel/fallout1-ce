@@ -864,7 +864,13 @@ static int world_xpos;
 static int world_ypos;
 
 // 0x670FD4
-int world_win;
+int world_win = -1;
+
+// Controller: finestra della mappa del mondo.
+int worldmapGetWindow()
+{
+    return world_win;
+}
 
 // 0x670FD8
 static unsigned char TwnSelKnwFlag[15][7];
@@ -3496,6 +3502,7 @@ void KillWorldWin()
 {
     if (wwin_flag) {
         win_delete(world_win);
+        world_win = -1;
         tbutntgl = 0;
         wwin_flag = 0;
         dropbtn = 0;

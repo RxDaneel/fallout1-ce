@@ -72,6 +72,15 @@ void win_set_minimized_title(const char* title);
 void win_set_trans_b2b(int id, WindowBlitProc* trans_b2b);
 bool GNWSystemError(const char* str);
 
+typedef struct NavTarget {
+    Rect rect;
+    int win;
+    int btn;
+} NavTarget;
+
+int windowManagerGetNavTargets(NavTarget* targets, int max, int excludeWin1, int excludeWin2);
+int windowManagerGetTopVisibleWindow(int excludeWin1, int excludeWin2);
+
 } // namespace fallout
 
 #endif /* FALLOUT_PLIB_GNW_GNW_H_ */

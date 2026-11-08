@@ -277,7 +277,13 @@ static MessageListItem lsgmesg;
 static int dbleclkcntr;
 
 // 0x612D58
-static int lsgwin;
+static int lsgwin = -1;
+
+// Controller: finestra di salvataggio/caricamento (per usare le frecce).
+int loadSaveGetWindow()
+{
+    return lsgwin;
+}
 
 // 0x612D5C
 static unsigned char* lsbmp[LOAD_SAVE_FRM_COUNT];
@@ -1480,6 +1486,7 @@ static int LSGameStart(int windowType)
 static int LSGameEnd(int windowType)
 {
     win_delete(lsgwin);
+    lsgwin = -1;
     text_font(fontsave);
     message_exit(&lsgame_msgfl);
 

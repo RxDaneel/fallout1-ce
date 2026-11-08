@@ -1,34 +1,31 @@
 # Controlli mobile
 
-Versione di Fallout Community Edition con controller e tocco ripensati per
-iPhone e Android (testata pensando a iPhone 14 Pro e Retroid Pocket 5).
-Funziona allo stesso modo in Fallout e Fallout 2.
+Versione di Fallout Community Edition pensata per giocare con un controller
+(Retroid Pocket 5, pad Bluetooth su iPhone) o con il tocco. Funziona allo
+stesso modo in Fallout e Fallout 2.
 
-## Controller
+Con il controller non si guida mai un puntatore: sulla mappa il gioco
+evidenzia da solo con cosa interagire, nei menu la croce salta da un pulsante
+all'altro, in combattimento si scelgono bersagli ed esagoni.
 
-Il controller cambia comportamento in base a dove sei: sulla mappa, in
-combattimento, in un dialogo o in un menu (inventario, Pip-Boy, scheda
-personaggio, mappa del mondo).
+## Sulla mappa
 
-### Sulla mappa (esplorazione) — senza puntatore
-
-Appena usi il controller il cursore sparisce. Il gioco evidenzia da solo
-(contorno giallo) l'oggetto o la persona più vicina nella direzione in cui ti
-muovi, e ne scrive il nome nella console.
+Il gioco evidenzia (contorno giallo) la persona o l'oggetto più vicino nella
+direzione in cui ti muovi e ne scrive il nome nella console.
 
 | Comando | Azione |
 |---|---|
-| Stick sinistro | Muove il personaggio (a fondo corsa corre) |
+| Stick sinistro | Muove il personaggio (a fondo corsa corre); la visuale segue |
 | Stick destro | Sposta la visuale |
 | A | Azione sull'oggetto evidenziato: parla, apri, perquisisci, raccogli |
-| A tenuto premuto | Menu azioni del gioco (guarda, usa, oggetto, abilità...); croce ↑↓ per scegliere, rilascia A per confermare |
+| A tenuto premuto | Menu azioni (guarda, usa, oggetto, abilità...): croce ↑↓ per scegliere, rilascia A per confermare |
 | X | Esamina l'oggetto evidenziato |
 | LB / RB | Evidenzia l'oggetto precedente / successivo attorno a te |
 | B | Annulla (es. un'abilità scelta dallo Skilldex) |
 | Y | Inventario |
+| Croce ↑ ↓ ← → | Pip-Boy, Personaggio, Abilità (Skilldex), Automappa |
 | LT | Cambia mano attiva |
 | RT | Inizia il combattimento |
-| Croce ↑ ↓ ← → | Pip-Boy, Personaggio, Abilità (Skilldex), Automappa |
 | L3 | Centra la visuale sul personaggio |
 | R3 | Cambia modalità d'attacco dell'arma |
 | Start | Menu di gioco |
@@ -36,69 +33,77 @@ muovi, e ne scrive il nome nella console.
 | Select + ↑ | Riposa (orologio del Pip-Boy) |
 
 Abilità: scegli l'abilità dallo Skilldex (croce ←), evidenzia il bersaglio con
-LB/RB (in questa modalità puoi scegliere anche te stesso, per il pronto
-soccorso) e premi A.
+LB/RB (puoi scegliere anche te stesso, per il pronto soccorso) e premi A.
 
-Se tocchi lo schermo o muovi un mouse il cursore ricompare.
-
-### In combattimento
-
-Come sopra, con queste differenze:
+## In combattimento
 
 | Comando | Azione |
 |---|---|
-| Stick sinistro | Cursore (il combattimento è a turni, ci si muove scegliendo l'esagono) |
-| LB / RB | Aggancia il nemico precedente / successivo, dal più vicino, con il mirino già pronto |
-| A | Primo clic su un nemico: mirino e probabilità di colpire. Secondo clic: attacca |
+| LB / RB | Nemico precedente / successivo (dal più vicino), con il mirino e la probabilità di colpire |
+| Stick sinistro | Sceglie l'esagono di destinazione, un passo alla volta; mostra i punti azione necessari |
+| A | Attacca il nemico scelto, oppure vai all'esagono scelto |
+| B | Annulla la scelta |
+| X | Cambia cursore (movimento / attacco / usa) |
+| R3 | Modalità d'attacco (es. colpo mirato: la parte del corpo si sceglie con la croce) |
 | RT | Fine turno |
-| Select + RT (o Select + RB) | Termina il combattimento |
+| Select + RT | Termina il combattimento |
+| Stick destro | Sposta la visuale |
+| Y | Inventario (per usare oggetti o cambiare arma) |
 
-### Dialoghi
+## Menu, finestre e dialoghi
 
-| Comando | Azione |
-|---|---|
-| Croce ↑ ↓ | Passa da una risposta all'altra |
-| Croce ← → | Pagina precedente / successiva del testo |
-| A | Sceglie la risposta |
-| B | Esci / indietro |
-
-### Menu e finestre
+Inventario, bottino, scambio, Pip-Boy, scheda personaggio, Skilldex, opzioni,
+salvataggi, creazione del personaggio, dialoghi, mappa del mondo.
 
 | Comando | Azione |
 |---|---|
-| Stick sinistro | Cursore |
-| Stick destro | Scorre le liste |
-| A / X | Clic / clic destro |
-| B o Start | Indietro (Esc) |
+| Croce o stick sinistro | Salta al pulsante sopra / sotto / a sinistra / a destra |
+| A | Premi il pulsante (tieni premuto per trascinare: es. un oggetto dall'inventario alla mano, sposta con la croce e rilascia) |
+| B o Start | Indietro / chiudi |
 | Y | Conferma (Invio) |
-| Croce | Frecce |
-| LB / RB, LT / RT | Pagina su / giù |
+| X | Clic destro |
+| LB / RB, LT / RT | Scorri la lista / pagina precedente e successiva |
+| Stick destro | Cursore libero, per i rari punti che non sono pulsanti |
+
+Nelle liste (abilità, note del Pip-Boy...) su e giù scorrono le righe.
+
+Casi particolari:
+
+- **Scheda personaggio**: in Fallout 2 la croce sceglie caratteristiche e
+  abilità; in Fallout 1 su/giù scorrono le righe e A seleziona. In entrambi
+  sinistra/destra tolgono/aggiungono punti. I pulsanti (Fatto, Annulla...) si
+  raggiungono con lo stick sinistro; Y conferma, B annulla.
+- **Salvataggi**: su/giù scelgono lo slot, Y conferma.
+- **Dialoghi**: la selezione parte dalla prima risposta; Barter e Review si
+  raggiungono con la croce.
+- **Mappa del mondo**: la croce salta tra le città conosciute; lo stick
+  sinistro muove un cursore libero per viaggiare verso qualsiasi punto (A).
 
 ## Tocco
 
-Con il tocco "diretto" (predefinito) il cursore va dove tocchi.
+Se tocchi lo schermo il gioco passa ai comandi touch (e torna al controller
+appena usi il pad).
 
 | Gesto | Azione |
 |---|---|
 | Tocco | Clic intelligente: oggetto = usa/parla/raccogli, pavimento = cammina |
 | Tocco su un nemico (in combattimento) | Primo tocco: mirino. Secondo tocco: attacca |
 | Tieni premuto | Menu azioni (trascina per scegliere); nell'inventario trascina gli oggetti |
-| Trascina con un dito | Sposta il cursore senza cliccare (mostra nomi e probabilità di colpire) |
-| Tocco con due dita | Cambia cursore (come il tasto destro) |
+| Trascina con un dito | Sposta il cursore senza cliccare |
+| Tocco con due dita | Cambia cursore |
 | Trascina con due dita | Scorre la mappa |
 
-Il tocco "aggancia" gli oggetti vicini: non serve centrare la figura al
-pixel. Il tasto Indietro di Android fa Esc.
+Il tasto Indietro di Android fa Esc.
 
 ## Impostazioni
 
-In `fallout.cfg` (Fallout 2: `fallout2.cfg`), sezione `[mobile]`:
+In `fallout2.cfg` (Fallout 1: `fallout.cfg`), sezione `[mobile]`:
 
 ```ini
 [mobile]
 touch_mode=1              ; 1 = diretto, 0 = trackpad (come la versione originale)
 touch_snap=1              ; aggancio degli oggetti vicini al tocco
-gamepad_cursor_speed=100  ; velocità del cursore, in % (25-400)
+gamepad_cursor_speed=100  ; velocità del cursore libero, in % (25-400)
 gamepad_deadzone=20       ; zona morta degli stick, in % (5-60)
 camera_follow=1           ; la visuale segue il personaggio
 stick_movement=1          ; 1 = stick sinistro muove il personaggio, 0 = cursore

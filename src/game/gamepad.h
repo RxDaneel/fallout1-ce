@@ -27,6 +27,10 @@ void gamepadGameTick(bool isInCombatMode);
 // Il giocatore ha usato mouse o tocco: esce dalla modalità senza puntatore.
 void gamepadPointerUsed();
 
+#ifdef FALLOUT_AUTOTEST
+void gamepadDebugDumpNav(const char* name);
+#endif
+
 // Impostazioni [mobile] di fallout.cfg.
 bool touchDirectModeEnabled();
 bool touchSnapEnabled();

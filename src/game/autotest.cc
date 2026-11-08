@@ -14,6 +14,7 @@
 //   axis ASSE VALORE        asse del controller (leftx, lefty, rightx,
 //                           righty, lefttrigger, righttrigger), -32768..32767
 //   shot NOME               salva NOME.bmp nella cartella FALLOUT_SHOTS
+//   nav NOME                come shot, più l'elenco dei pulsanti (NOME.nav)
 //   log TESTO               scrive su stdout
 //   quit                    esce
 //
@@ -30,6 +31,7 @@
 #include <string>
 #include <vector>
 
+#include "gamepad.h"
 #include "plib/gnw/input.h"
 #include "plib/gnw/mouse.h"
 #include "plib/gnw/svga.h"
@@ -222,6 +224,9 @@ void autotestTick()
             padAxis(arg1, atoi(arg2));
         } else if (strcmp(command, "shot") == 0) {
             screenshot(arg1);
+        } else if (strcmp(command, "nav") == 0) {
+            screenshot(arg1);
+            gamepadDebugDumpNav(arg1);
         } else if (strcmp(command, "log") == 0) {
             printf("[autotest] %s\n", line.c_str() + 4);
             fflush(stdout);

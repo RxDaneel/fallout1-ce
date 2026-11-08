@@ -502,7 +502,13 @@ static int SliderNegID;
 static MessageListItem mesg;
 
 // 0x56EC74
-static int edit_win;
+static int edit_win = -1;
+
+// Controller: finestra della scheda personaggio (per usare le frecce).
+int characterEditorGetWindow()
+{
+    return edit_win;
+}
 
 // 0x56EC78
 static unsigned char* pwin_buf;
@@ -1385,6 +1391,7 @@ static int CharEditStart()
 static void CharEditEnd()
 {
     win_delete(edit_win);
+    edit_win = -1;
 
     for (int index = 0; index < EDITOR_GRAPHIC_COUNT; index++) {
         art_ptr_unlock(grph_key[index]);

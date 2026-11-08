@@ -1,9 +1,11 @@
 #include "game/gamepad.h"
 
+#include <climits>
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string>
 
 #include <algorithm>
 #include <vector>
@@ -15,11 +17,13 @@
 #include "game/config.h"
 #include "game/critter.h"
 #include "game/display.h"
+#include "game/editor.h"
 #include "game/game.h"
 #include "game/gconfig.h"
 #include "game/gdialog.h"
 #include "game/gmouse.h"
 #include "game/intface.h"
+#include "game/loadsave.h"
 #include "game/map.h"
 #include "game/object.h"
 #include "game/party.h"
@@ -27,6 +31,7 @@
 #include "game/proto.h"
 #include "game/skill_defs.h"
 #include "game/tile.h"
+#include "game/worldmap.h"
 #include "plib/gnw/gnw.h"
 #include "plib/gnw/input.h"
 #include "plib/gnw/mouse.h"
@@ -98,6 +103,12 @@ enum Action {
     ACTION_DIALOG_NEXT,
     ACTION_PAD_USE, // A senza puntatore: usa l'oggetto evidenziato
     ACTION_PAD_LOOK, // X senza puntatore: esamina l'oggetto evidenziato
+    ACTION_NAV_UP, // menu: salta al pulsante sopra / sotto / a sinistra / a destra
+    ACTION_NAV_DOWN,
+    ACTION_NAV_LEFT,
+    ACTION_NAV_RIGHT,
+    ACTION_WHEEL_UP, // menu: scorri la lista
+    ACTION_WHEEL_DOWN,
 };
 
 struct Binding {
@@ -166,6 +177,28 @@ static bool gPendingLook = false;
 static double gFacingX = 0.0; // direzione in cui "guarda" il personaggio
 static double gFacingY = 1.0;
 static Uint32 gLastScrollTick = 0;
+
+// Combattimento: esagono scelto con lo stick.
+static int gCombatHex = -1;
+static int gCombatHexOrigin = -1;
+static Uint32 gCombatHexNext = 0;
+static int gCombatHexLastDir = -1;
+static bool gCombatStickActive = false;
+
+// Navigazione nei menu.
+static int gNavDirX = 0; // direzione tenuta premuta (croce)
+static int gNavDirY = 0;
+static int gNavPendingX = 0; // salto da fare al prossimo frame
+static int gNavPendingY = 0;
+static Uint32 gNavNextRepeat = 0;
+static int gNavWin = -1; // pulsante selezionato
+static int gNavBtn = -1;
+static int gWheelPending = 0;
+static int gLastContext = -1;
+static Uint32 gNavAutoSelectAt = 0;
+static int gNavStickDirX = 0;
+static int gNavStickDirY = 0;
+static Uint32 gNavStickNext = 0;
 
 static Uint32 gLastGameTick = 0;
 
@@ -275,6 +308,34 @@ static Binding act(Action action)
     return binding;
 }
 
+static int topMenuWindow()
+{
+    return windowManagerGetTopVisibleWindow(display_win, interfaceWindow);
+}
+
+// Fallout 2: la scheda personaggio scorre caratteristiche e abilità con le
+// frecce. Fallout 1 solo sinistra/destra (togli/aggiungi punti): su e giù
+// scorrono le righe con il cursore (vedi navTick).
+static const bool kEditorVerticalArrows = false;
+
+static bool menuUsesArrowKeys()
+{
+    int top = topMenuWindow();
+    return top != -1 && ((kEditorVerticalArrows && top == characterEditorGetWindow()) || top == loadSaveGetWindow());
+}
+
+static bool menuUsesSideArrowKeys()
+{
+    int top = topMenuWindow();
+    return top != -1 && top == characterEditorGetWindow();
+}
+
+static bool menuIsWorldmap()
+{
+    int top = topMenuWindow();
+    return top != -1 && top == worldmapGetWindow();
+}
+
 // Tabella dei comandi. Vedi CONTROLLI.md per lo schema completo.
 static Binding bindingFor(int button, Context context)
 {
@@ -326,27 +387,32 @@ static Binding bindingFor(int button, Context context)
         }
         break;
     case CONTEXT_DIALOG:
-        switch (button) {
-        case SDL_CONTROLLER_BUTTON_A:
-            return act(ACTION_MOUSE_LEFT);
-        case SDL_CONTROLLER_BUTTON_X:
-            return act(ACTION_MOUSE_RIGHT);
-        case SDL_CONTROLLER_BUTTON_B:
-        case SDL_CONTROLLER_BUTTON_START:
-            return keyTap(SDL_SCANCODE_ESCAPE);
-        case SDL_CONTROLLER_BUTTON_DPAD_UP:
-            return act(ACTION_DIALOG_PREV);
-        case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
-            return act(ACTION_DIALOG_NEXT);
-        case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
-            return key(SDL_SCANCODE_UP); // pagina precedente del testo
-        case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
-            return key(SDL_SCANCODE_DOWN); // pagina successiva del testo
-        case SDL_CONTROLLER_BUTTON_Y:
-            return keyTap(SDL_SCANCODE_RETURN);
-        }
-        break;
     case CONTEXT_WINDOW:
+        // Scheda personaggio e salvataggi hanno già una selezione da
+        // tastiera: la croce manda le frecce (su/giù scegli, sinistra/destra
+        // togli/aggiungi punti). I pulsanti si raggiungono con lo stick.
+        if (menuUsesSideArrowKeys() && !menuUsesArrowKeys()) {
+            switch (button) {
+            case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+                return key(SDL_SCANCODE_LEFT);
+            case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
+                return key(SDL_SCANCODE_RIGHT);
+            }
+        }
+        if (menuUsesArrowKeys()) {
+            switch (button) {
+            case SDL_CONTROLLER_BUTTON_DPAD_UP:
+                return key(SDL_SCANCODE_UP);
+            case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
+                return key(SDL_SCANCODE_DOWN);
+            case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+                return key(SDL_SCANCODE_LEFT);
+            case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
+                return key(SDL_SCANCODE_RIGHT);
+            }
+        }
+        // Menu, finestre e dialoghi: la croce (e lo stick sinistro) saltano
+        // da un pulsante all'altro, A lo preme.
         switch (button) {
         case SDL_CONTROLLER_BUTTON_A:
             return act(ACTION_MOUSE_LEFT);
@@ -358,17 +424,17 @@ static Binding bindingFor(int button, Context context)
         case SDL_CONTROLLER_BUTTON_Y:
             return keyTap(SDL_SCANCODE_RETURN);
         case SDL_CONTROLLER_BUTTON_DPAD_UP:
-            return key(SDL_SCANCODE_UP);
+            return act(ACTION_NAV_UP);
         case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
-            return key(SDL_SCANCODE_DOWN);
+            return act(ACTION_NAV_DOWN);
         case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
-            return key(SDL_SCANCODE_LEFT);
+            return act(ACTION_NAV_LEFT);
         case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
-            return key(SDL_SCANCODE_RIGHT);
+            return act(ACTION_NAV_RIGHT);
         case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
-            return key(SDL_SCANCODE_PAGEUP);
+            return act(ACTION_WHEEL_UP);
         case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
-            return key(SDL_SCANCODE_PAGEDOWN);
+            return act(ACTION_WHEEL_DOWN);
         }
         break;
     }
@@ -391,7 +457,7 @@ static Binding triggerBindingFor(bool right, Context context)
         return keyTap(context == CONTEXT_COMBAT ? SDL_SCANCODE_SPACE : SDL_SCANCODE_A);
     }
 
-    if (context == CONTEXT_WINDOW) {
+    if (context == CONTEXT_WINDOW || context == CONTEXT_DIALOG) {
         return right ? key(SDL_SCANCODE_PAGEDOWN) : key(SDL_SCANCODE_PAGEUP);
     }
 
@@ -414,7 +480,13 @@ static void bindingPress(int slot, Binding binding)
         inputInjectKey(binding.scancode, false);
         break;
     case ACTION_MOUSE_LEFT:
-        if (mapIsActive()) {
+        if (gPadMode && currentContext() == CONTEXT_COMBAT) {
+            // Con il controller in combattimento A esegue subito: il
+            // bersaglio (LB/RB) o l'esagono (stick) li hai già scelti.
+            if (gmouse_3d_get_mode() == GAME_MOUSE_MODE_MOVE) {
+                gCombatHex = -1;
+            }
+        } else if (mapIsActive()) {
             int mouseX;
             int mouseY;
             mouse_get_position(&mouseX, &mouseY);
@@ -450,6 +522,26 @@ static void bindingPress(int slot, Binding binding)
     case ACTION_PAD_LOOK:
         gPendingLook = true;
         break;
+    case ACTION_NAV_UP:
+    case ACTION_NAV_DOWN:
+    case ACTION_NAV_LEFT:
+    case ACTION_NAV_RIGHT:
+        gNavDirX = binding.action == ACTION_NAV_LEFT ? -1 : (binding.action == ACTION_NAV_RIGHT ? 1 : 0);
+        gNavDirY = binding.action == ACTION_NAV_UP ? -1 : (binding.action == ACTION_NAV_DOWN ? 1 : 0);
+        gNavPendingX = gNavDirX;
+        gNavPendingY = gNavDirY;
+        gNavNextRepeat = SDL_GetTicks() + 380;
+        break;
+    case ACTION_WHEEL_UP:
+        gWheelPending += 1;
+        inputInjectKey(SDL_SCANCODE_PAGEUP, true);
+        inputInjectKey(SDL_SCANCODE_PAGEUP, false);
+        break;
+    case ACTION_WHEEL_DOWN:
+        gWheelPending -= 1;
+        inputInjectKey(SDL_SCANCODE_PAGEDOWN, true);
+        inputInjectKey(SDL_SCANCODE_PAGEDOWN, false);
+        break;
     case ACTION_DIALOG_PREV:
         dialogStep(-1);
         break;
@@ -473,6 +565,13 @@ static void bindingRelease(int slot)
         break;
     case ACTION_MOUSE_RIGHT:
         gMouseRightHeld = false;
+        break;
+    case ACTION_NAV_UP:
+    case ACTION_NAV_DOWN:
+    case ACTION_NAV_LEFT:
+    case ACTION_NAV_RIGHT:
+        gNavDirX = 0;
+        gNavDirY = 0;
         break;
     case ACTION_PAD_USE:
         if (gMenuHold) {
@@ -646,6 +745,285 @@ static void dialogStep(int step)
     gWarpY = ys[next];
 }
 
+// -----------------------------------------------------------------------------
+// Menu: navigazione a salti tra i pulsanti
+// -----------------------------------------------------------------------------
+
+static int navFind(const std::vector<NavTarget>& targets, int win, int btn)
+{
+    for (size_t i = 0; i < targets.size(); i++) {
+        if (targets[i].win == win && targets[i].btn == btn) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static void navCenter(const NavTarget& target, int* x, int* y)
+{
+    *x = (target.rect.ulx + target.rect.lrx) / 2;
+    *y = (target.rect.uly + target.rect.lry) / 2;
+}
+
+static int navNearest(const std::vector<NavTarget>& targets, int x, int y)
+{
+    int best = -1;
+    long long bestDistance = LLONG_MAX;
+    for (size_t i = 0; i < targets.size(); i++) {
+        const Rect& r = targets[i].rect;
+        // Distanza dal rettangolo (0 se il punto è dentro).
+        int ddx = x < r.ulx ? r.ulx - x : (x > r.lrx ? x - r.lrx : 0);
+        int ddy = y < r.uly ? r.uly - y : (y > r.lry ? y - r.lry : 0);
+        long long distance = (long long)ddx * ddx + (long long)ddy * ddy;
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            best = (int)i;
+        }
+    }
+    return best;
+}
+
+// Pulsante iniziale: quello sotto il cursore se c'è, altrimenti il primo in
+// alto a sinistra (la lettura naturale di un menu).
+static int navDefault(const std::vector<NavTarget>& targets, int mouseX, int mouseY)
+{
+    // Nei dialoghi si parte dalla prima risposta.
+    if (dialog_active()) {
+        int xs[DIALOG_TARGETS_MAX];
+        int ys[DIALOG_TARGETS_MAX];
+        if (gameDialogGetOptionTargets(xs, ys, DIALOG_TARGETS_MAX) > 0) {
+            for (size_t i = 0; i < targets.size(); i++) {
+                const Rect& r = targets[i].rect;
+                if (ys[0] >= r.uly && ys[0] <= r.lry && xs[0] >= r.ulx - 60 && xs[0] <= r.lrx) {
+                    return (int)i;
+                }
+            }
+        }
+    }
+
+    for (size_t i = 0; i < targets.size(); i++) {
+        const Rect& r = targets[i].rect;
+        if (mouseX >= r.ulx && mouseX <= r.lrx && mouseY >= r.uly && mouseY <= r.lry) {
+            return (int)i;
+        }
+    }
+
+    int best = -1;
+    long long bestScore = LLONG_MAX;
+    for (size_t i = 0; i < targets.size(); i++) {
+        const Rect& r = targets[i].rect;
+        long long score = (long long)r.uly * 4 + r.ulx; // prima le righe in alto
+        if (score < bestScore) {
+            bestScore = score;
+            best = (int)i;
+        }
+    }
+    return best;
+}
+
+// Il pulsante più vicino nella direzione indicata: conta soprattutto lo
+// spostamento lungo la direzione, poco quello di lato.
+static int navStep(const std::vector<NavTarget>& targets, int current, int dirX, int dirY)
+{
+    int cx;
+    int cy;
+    navCenter(targets[current], &cx, &cy);
+    const Rect& cr = targets[current].rect;
+
+    int best = -1;
+    double bestScore = 1e18;
+    for (size_t i = 0; i < targets.size(); i++) {
+        if ((int)i == current) {
+            continue;
+        }
+        const Rect& r = targets[i].rect;
+        int x;
+        int y;
+        navCenter(targets[i], &x, &y);
+
+        double along;
+        double side;
+        if (dirX != 0) {
+            // Deve stare davvero da quella parte (oltre il bordo del pulsante
+            // attuale, con un po' di tolleranza).
+            if (dirX > 0 && r.ulx <= cr.ulx + 2) continue;
+            if (dirX < 0 && r.lrx >= cr.lrx - 2) continue;
+            along = fabs((double)(x - cx));
+            // Sovrapposizione verticale: stessa riga = nessuna penalità.
+            bool overlap = r.uly <= cr.lry && r.lry >= cr.uly;
+            side = overlap ? 0.0 : fabs((double)(y - cy));
+        } else {
+            if (dirY > 0 && r.uly <= cr.uly + 2) continue;
+            if (dirY < 0 && r.lry >= cr.lry - 2) continue;
+            along = fabs((double)(y - cy));
+            bool overlap = r.ulx <= cr.lrx && r.lrx >= cr.ulx;
+            side = overlap ? 0.0 : fabs((double)(x - cx));
+        }
+        double score = along + side * 3.0;
+        if (score < bestScore) {
+            bestScore = score;
+            best = (int)i;
+        }
+    }
+    return best;
+}
+
+// Ogni frame nei menu: seleziona un pulsante e sposta lì il cursore.
+static void navTick(Context context, Uint32 now, int* dx, int* dy)
+{
+    bool inMenu = context == CONTEXT_WINDOW || context == CONTEXT_DIALOG;
+    if (context != gLastContext) {
+        gLastContext = context;
+        gNavWin = -1;
+        gNavBtn = -1;
+        gNavAutoSelectAt = inMenu ? now + 250 : 0;
+    }
+    if (!inMenu || !gPadMode) {
+        return;
+    }
+
+    // Croce tenuta premuta: ripete.
+    if ((gNavDirX != 0 || gNavDirY != 0) && now >= gNavNextRepeat) {
+        gNavPendingX = gNavDirX;
+        gNavPendingY = gNavDirY;
+        gNavNextRepeat = now + 110;
+    }
+
+    // Stick sinistro come la croce (nella mappa del mondo è un cursore
+    // libero, per viaggiare verso qualsiasi punto).
+    double nx;
+    double ny;
+    bool worldmap = menuIsWorldmap();
+    if (worldmap && stickRead(SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY, &nx, &ny) > 0.0) {
+        gNavWin = -1;
+        gNavBtn = -1;
+    } else if (!worldmap && stickRead(SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY, &nx, &ny) > 0.55) {
+        int sx = fabs(nx) >= fabs(ny) ? (nx > 0 ? 1 : -1) : 0;
+        int sy = fabs(nx) >= fabs(ny) ? 0 : (ny > 0 ? 1 : -1);
+        if (sx != gNavStickDirX || sy != gNavStickDirY) {
+            gNavPendingX = sx;
+            gNavPendingY = sy;
+            gNavStickNext = now + 350;
+        } else if (now >= gNavStickNext) {
+            gNavPendingX = sx;
+            gNavPendingY = sy;
+            gNavStickNext = now + 130;
+        }
+        gNavStickDirX = sx;
+        gNavStickDirY = sy;
+    } else {
+        gNavStickDirX = 0;
+        gNavStickDirY = 0;
+    }
+
+    bool wantJump = gNavPendingX != 0 || gNavPendingY != 0;
+    bool autoSelect = gNavAutoSelectAt != 0 && now >= gNavAutoSelectAt;
+    // Controllo periodico: il cursore resta agganciato al pulsante scelto
+    // (il gioco a volte lo sposta quando apre una finestra), e se il pulsante
+    // sparisce se ne sceglie un altro.
+    static Uint32 nextCheck = 0;
+    bool check = gNavWin != -1 && now >= nextCheck && !gMouseLeftHeld;
+    if (!wantJump && !autoSelect && !check) {
+        return;
+    }
+    nextCheck = now + 150;
+
+    std::vector<NavTarget> targets(256);
+    int count = windowManagerGetNavTargets(targets.data(), (int)targets.size(), display_win, interfaceWindow);
+    targets.resize(count);
+    if (count == 0) {
+        gNavPendingX = 0;
+        gNavPendingY = 0;
+        return;
+    }
+
+    int mouseX;
+    int mouseY;
+    mouse_get_position(&mouseX, &mouseY);
+
+    int current = navFind(targets, gNavWin, gNavBtn);
+    int next = -1;
+
+    // Aree alte (liste di righe, come le abilità o le note del Pip-Boy): su e
+    // giù scorrono le righe dentro l'area, si esce solo dai bordi.
+    if (wantJump && current != -1 && gNavPendingY != 0) {
+        const Rect& r = targets[current].rect;
+        int rowStep = 11 * screenGetHeight() / 480;
+        if (screenGetHeight() > 480) {
+            rowStep = 11; // l'interfaccia resta a 480 righe anche su schermi più alti
+        }
+        if (r.lry - r.uly >= 60) {
+            int y = mouseY + gNavPendingY * rowStep;
+            if (y >= r.uly + 3 && y <= r.lry - 3) {
+                *dy += y - mouseY;
+                gNavPendingX = 0;
+                gNavPendingY = 0;
+                return;
+            }
+        }
+    }
+
+    if (wantJump) {
+        if (current == -1) {
+            next = navDefault(targets, mouseX, mouseY);
+        } else {
+            next = navStep(targets, current, gNavPendingX, gNavPendingY);
+        }
+    } else if (current == -1) {
+        // Appena aperta una finestra, o il pulsante scelto non c'è più.
+        next = navDefault(targets, mouseX, mouseY);
+    } else {
+        const Rect& r = targets[current].rect;
+        if (mouseX < r.ulx || mouseX > r.lrx || mouseY < r.uly || mouseY > r.lry) {
+            next = current;
+        }
+    }
+    int lastJumpY = gNavPendingY;
+#ifdef FALLOUT_AUTOTEST
+    if (wantJump) {
+        printf("[nav] salto (%d,%d) da %d a %d su %d pulsanti\n", gNavPendingX, gNavPendingY, current, next, count);
+    }
+#endif
+    gNavPendingX = 0;
+    gNavPendingY = 0;
+    gNavAutoSelectAt = 0;
+
+    if (next != -1) {
+        bool enteringVertically = next != current && current != -1 && lastJumpY != 0;
+        gNavWin = targets[next].win;
+        gNavBtn = targets[next].btn;
+        int x;
+        int y;
+        navCenter(targets[next], &x, &y);
+        const Rect& nr = targets[next].rect;
+        if (enteringVertically && nr.lry - nr.uly >= 60) {
+            // Si entra in una lista dall'alto o dal basso: prima/ultima riga.
+            y = lastJumpY > 0 ? nr.uly + 6 : nr.lry - 6;
+        }
+        *dx += x - mouseX;
+        *dy += y - mouseY;
+        gCursorRemainderX = 0.0;
+        gCursorRemainderY = 0.0;
+    }
+}
+
+#ifdef FALLOUT_AUTOTEST
+void gamepadDebugDumpNav(const char* name)
+{
+    std::vector<NavTarget> targets(256);
+    int count = windowManagerGetNavTargets(targets.data(), (int)targets.size(), display_win, interfaceWindow);
+    const char* dir = getenv("FALLOUT_SHOTS");
+    std::string path = std::string(dir != nullptr ? dir : ".") + "/" + name + ".nav";
+    FILE* stream = fopen(path.c_str(), "wt");
+    for (int i = 0; i < count; i++) {
+        fprintf(stream, "%d %d %d %d %d %d %d\n", targets[i].rect.ulx, targets[i].rect.uly, targets[i].rect.lrx, targets[i].rect.lry, targets[i].win, targets[i].btn,
+            targets[i].win == gNavWin && targets[i].btn == gNavBtn);
+    }
+    fclose(stream);
+    printf("[pad] %d pulsanti, contesto %d\n", count, currentContext());
+}
+#endif
+
 void gamepadGetMouseInput(int* dx, int* dy, int* buttons, int* wheelX, int* wheelY)
 {
     *dx = 0;
@@ -678,6 +1056,8 @@ void gamepadGetMouseInput(int* dx, int* dy, int* buttons, int* wheelX, int* whee
 
     Context context = currentContext();
     bool pointerless = context == CONTEXT_MAP && gPadMode;
+
+    navTick(context, now, dx, dy);
 
     // Senza puntatore il cursore resta nascosto sulla mappa; ricompare nei
     // menu, in combattimento e quando si apre il menu azioni.
@@ -741,10 +1121,21 @@ void gamepadGetMouseInput(int* dx, int* dy, int* buttons, int* wheelX, int* whee
     double cy = 0.0;
     double cursorMagnitude = 0.0;
 
+    if (gWheelPending != 0) {
+        *wheelY = gWheelPending > 0 ? 1 : -1;
+        gWheelPending += gWheelPending > 0 ? -1 : 1;
+    }
+
+    // Stick sinistro: personaggio (mappa), esagoni (combattimento), salti tra
+    // i pulsanti (menu). Muove il cursore solo se il movimento con lo stick è
+    // disattivato nelle impostazioni.
     double nx;
     double ny;
     double left = stickRead(SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY, &nx, &ny);
-    if (!leftMovesDude && left > 0.0) {
+    bool worldmap = context == CONTEXT_WINDOW && menuIsWorldmap();
+    bool leftIsCursor = (context == CONTEXT_MAP && !gMobile.stickMovement) || worldmap;
+    (void)leftMovesDude;
+    if (leftIsCursor && left > 0.0) {
         cx = nx;
         cy = ny;
         cursorMagnitude = left;
@@ -754,14 +1145,15 @@ void gamepadGetMouseInput(int* dx, int* dy, int* buttons, int* wheelX, int* whee
     double ry;
     double right = stickRead(SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY, &rx, &ry);
     if (right > 0.0) {
-        if (context == CONTEXT_WINDOW || context == CONTEXT_DIALOG) {
-            // Nei menu lo stick destro scorre le liste.
-            Uint32 interval = (Uint32)(260 - 200 * right);
-            if (now - gLastWheelTick >= interval && fabs(ry) > 0.5) {
-                *wheelY = ry < 0 ? 1 : -1;
-                gLastWheelTick = now;
-            }
+        if (context == CONTEXT_COMBAT && gPadMode) {
+            // In combattimento lo stick destro sposta la visuale.
         } else if (right > cursorMagnitude) {
+            // Nei menu lo stick destro è un cursore libero di riserva, per i
+            // punti che non sono pulsanti (es. la mappa del mondo).
+            if (context == CONTEXT_WINDOW || context == CONTEXT_DIALOG) {
+                gNavWin = -1;
+                gNavBtn = -1;
+            }
             cx = rx;
             cy = ry;
             cursorMagnitude = right;
@@ -1014,6 +1406,39 @@ bool gamepadSmartClick(int x, int y)
     return true;
 }
 
+// Punto dell'oggetto su cui mettere il cursore: un pixel pieno dello sprite
+// vicino al centro (il gioco riconosce l'oggetto solo sui pixel pieni).
+static void objectAimPoint(Object* object, int* outX, int* outY)
+{
+    Rect rect;
+    obj_bound(object, &rect);
+    int x = (rect.ulx + rect.lrx) / 2;
+    int y = rect.uly + (rect.lry - rect.uly) * 3 / 5;
+
+    if (obj_intersects_with(object, x, y) == 0) {
+        int bestDistance = INT_MAX;
+        int bestX = x;
+        int bestY = y;
+        for (int sy = rect.uly; sy <= rect.lry; sy += 2) {
+            for (int sx = rect.ulx; sx <= rect.lrx; sx += 2) {
+                int ddx = sx - x;
+                int ddy = sy - y;
+                int distance = ddx * ddx + ddy * ddy;
+                if (distance < bestDistance && obj_intersects_with(object, sx, sy) != 0) {
+                    bestDistance = distance;
+                    bestX = sx;
+                    bestY = sy;
+                }
+            }
+        }
+        x = bestX;
+        y = bestY;
+    }
+
+    *outX = x;
+    *outY = y;
+}
+
 static void cycleTarget(int step, bool combat)
 {
     std::vector<Candidate> candidates;
@@ -1079,8 +1504,7 @@ static void cycleTarget(int step, bool combat)
 
     gTargetCurrent = candidates[index].object;
     gWarpPending = true;
-    gWarpX = candidates[index].x;
-    gWarpY = candidates[index].y;
+    objectAimPoint(gTargetCurrent, &gWarpX, &gWarpY);
 
     // Cursore giusto per l'oggetto: mirino sui nemici in combattimento,
     // freccia "usa" sugli oggetti in esplorazione.
@@ -1253,33 +1677,7 @@ static void focusParkCursor()
     int x = screenGetWidth() / 2;
     int y = screenGetHeight() - 20; // sulla barra dell'interfaccia
     if (gFocus != nullptr) {
-        Rect rect;
-        obj_bound(gFocus, &rect);
-        x = (rect.ulx + rect.lrx) / 2;
-        y = rect.uly + (rect.lry - rect.uly) * 3 / 5;
-
-        // Il gioco riconosce l'oggetto solo su un pixel pieno dello sprite
-        // (il centro di oggetti piatti o sottili può essere trasparente):
-        // cerca il pixel pieno più vicino al centro.
-        if (obj_intersects_with(gFocus, x, y) == 0) {
-            int bestDistance = INT_MAX;
-            int bestX = x;
-            int bestY = y;
-            for (int sy = rect.uly; sy <= rect.lry; sy += 2) {
-                for (int sx = rect.ulx; sx <= rect.lrx; sx += 2) {
-                    int ddx = sx - x;
-                    int ddy = sy - y;
-                    int distance = ddx * ddx + ddy * ddy;
-                    if (distance < bestDistance && obj_intersects_with(gFocus, sx, sy) != 0) {
-                        bestDistance = distance;
-                        bestX = sx;
-                        bestY = sy;
-                    }
-                }
-            }
-            x = bestX;
-            y = bestY;
-        }
+        objectAimPoint(gFocus, &x, &y);
     }
 
     int mouseX;
@@ -1373,6 +1771,95 @@ static void cameraStickTick()
     int dx = fabs(nx) > 0.38 ? (nx > 0 ? 1 : -1) : 0;
     int dy = fabs(ny) > 0.38 ? (ny > 0 ? 1 : -1) : 0;
     map_scroll(dx, dy);
+}
+
+// -----------------------------------------------------------------------------
+// Combattimento: esagono di destinazione scelto con lo stick
+// -----------------------------------------------------------------------------
+
+static void hexCenter(int tile, int* x, int* y)
+{
+    tile_coord(tile, x, y, obj_dude->elevation);
+    *x += 16;
+    *y += 8;
+}
+
+static void combatStickTick()
+{
+    double nx;
+    double ny;
+    double magnitude = stickRead(SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY, &nx, &ny);
+    Uint32 now = SDL_GetTicks();
+
+    if (magnitude < 0.5) {
+        gCombatStickActive = false;
+        return;
+    }
+
+    if (gCombatStickActive && now < gCombatHexNext) {
+        return;
+    }
+    gCombatHexNext = now + (gCombatStickActive ? 170 : 300);
+    gCombatStickActive = true;
+
+    // Si parte dal personaggio se si è mosso o se non c'è una scelta.
+    if (gCombatHex == -1 || gCombatHexOrigin != obj_dude->tile) {
+        gCombatHex = obj_dude->tile;
+        gCombatHexOrigin = obj_dude->tile;
+    }
+
+    // Tra i 6 lati dell'esagono quello più vicino alla direzione dello stick
+    // (calcolato sullo schermo, così vale per qualsiasi orientamento).
+    int cx;
+    int cy;
+    hexCenter(gCombatHex, &cx, &cy);
+    int bestRotation = -1;
+    double bestDot = -2.0;
+    double secondDot = -2.0;
+    int secondRotation = -1;
+    for (int rotation = 0; rotation < 6; rotation++) {
+        int neighbor = tile_num_in_direction(gCombatHex, rotation, 1);
+        if (neighbor == -1) {
+            continue;
+        }
+        int x;
+        int y;
+        hexCenter(neighbor, &x, &y);
+        double vx = x - cx;
+        double vy = y - cy;
+        double length = sqrt(vx * vx + vy * vy);
+        if (length < 1.0) {
+            continue;
+        }
+        double dot = (vx * nx + vy * ny) / length;
+        if (dot > bestDot) {
+            secondDot = bestDot;
+            secondRotation = bestRotation;
+            bestDot = dot;
+            bestRotation = rotation;
+        } else if (dot > secondDot) {
+            secondDot = dot;
+            secondRotation = rotation;
+        }
+    }
+    if (bestRotation == -1) {
+        return;
+    }
+    // Su e giù cadono a metà tra due lati: si alterna per andare dritti.
+    if (secondRotation != -1 && bestDot - secondDot < 0.08 && bestRotation == gCombatHexLastDir) {
+        bestRotation = secondRotation;
+    }
+    gCombatHexLastDir = bestRotation;
+
+    int next = tile_num_in_direction(gCombatHex, bestRotation, 1);
+    if (next == -1) {
+        return;
+    }
+    gCombatHex = next;
+
+    gmouse_3d_set_mode(GAME_MOUSE_MODE_MOVE);
+    gWarpPending = true;
+    hexCenter(gCombatHex, &gWarpX, &gWarpY);
 }
 
 // -----------------------------------------------------------------------------
@@ -1557,6 +2044,7 @@ void gamepadGameTick(bool isInCombatMode)
         gTargetCurrent = nullptr;
         gmouse_set_cursor(MOUSE_CURSOR_NONE);
         gmouse_3d_set_mode(pointerless ? GAME_MOUSE_MODE_ARROW : GAME_MOUSE_MODE_MOVE);
+        gCombatHex = -1;
     }
 
     if (!pointerless) {
@@ -1616,6 +2104,11 @@ void gamepadGameTick(bool isInCombatMode)
         if (pointerless) {
             focusLook();
         }
+    }
+
+    if (isInCombatMode && gPadMode) {
+        combatStickTick();
+        cameraStickTick();
     }
 
     if (!isInCombatMode && gMobile.stickMovement && !game_ui_is_disabled()) {

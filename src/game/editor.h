@@ -20,6 +20,8 @@ int editor_load(DB_FILE* stream);
 void editor_reset();
 void RedrwDMPrk();
 
+int characterEditorGetWindow();
+
 } // namespace fallout
 
 #endif /* FALLOUT_GAME_EDITOR_H_ */
