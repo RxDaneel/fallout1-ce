@@ -13,6 +13,8 @@ jobs:
   android:
     name: Android
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Clone
         uses: actions/checkout@v4
@@ -53,6 +55,14 @@ jobs:
           name: fallout-ce-android-controlli
           path: os/android/app/build/outputs/apk/release/*.apk
           retention-days: 30
+
+      # L'APK va subito nella release, senza aspettare la build iOS.
+      - name: Aggiorna l'APK nella release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp os/android/app/build/outputs/apk/release/*.apk /tmp/fallout-ce-controlli-android.apk
+          gh release upload controlli-latest /tmp/fallout-ce-controlli-android.apk --clobber --repo "$GITHUB_REPOSITORY" || true
 
   ios:
     name: iOS
