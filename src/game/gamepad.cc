@@ -5,6 +5,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <string>
 
 #include <algorithm>
@@ -23,12 +24,14 @@
 #include "game/editor.h"
 #include "game/gmouse.h"
 #include "game/intface.h"
+#include "game/item.h"
 #include "game/loadsave.h"
 #include "game/map.h"
 #include "game/object.h"
 #include "game/party.h"
 #include "game/proto.h"
 #include "game/protinst.h"
+#include "game/skill.h"
 #include "game/skill_defs.h"
 #include "game/tile.h"
 #include "game/worldmap.h"
@@ -36,6 +39,8 @@
 #include "plib/gnw/input.h"
 #include "plib/gnw/mouse.h"
 #include "plib/gnw/svga.h"
+#include "plib/gnw/text.h"
+#include "plib/color/color.h"
 
 namespace fallout {
 
@@ -53,9 +58,12 @@ struct MobileSettings {
     int deadzone = 20; // zona morta degli stick, in %
     bool cameraFollow = true; // la visuale segue il personaggio
     bool stickMovement = true; // stick sinistro = muovi il personaggio
+    bool buttonHints = true; // barra con i tasti da premere
 };
 
 static MobileSettings gMobile;
+
+static void hintsAfterScroll();
 
 static void mobileSettingsLoad()
 {
@@ -72,6 +80,7 @@ static void mobileSettingsLoad()
     if (config_get_value(&game_config, "mobile", "gamepad_deadzone", &value)) gMobile.deadzone = std::clamp(value, 5, 60);
     if (config_get_value(&game_config, "mobile", "camera_follow", &value)) gMobile.cameraFollow = value != 0;
     if (config_get_value(&game_config, "mobile", "stick_movement", &value)) gMobile.stickMovement = value != 0;
+    if (config_get_value(&game_config, "mobile", "button_hints", &value)) gMobile.buttonHints = value != 0;
 }
 
 bool touchDirectModeEnabled()
@@ -1791,6 +1800,7 @@ static void cameraStickTick()
     int dx = fabs(nx) > 0.38 ? (nx > 0 ? 1 : -1) : 0;
     int dy = fabs(ny) > 0.38 ? (ny > 0 ? 1 : -1) : 0;
     map_scroll(dx, dy);
+    hintsAfterScroll();
 }
 
 // -----------------------------------------------------------------------------
@@ -1977,6 +1987,7 @@ static void followCamera()
 
     bool wasVisible = gmouse_3d_is_on();
     map_scroll(stepX, stepY);
+    hintsAfterScroll();
     if (wasVisible && !gmouse_3d_is_on()) {
         gmouse_3d_on();
     }
@@ -2055,6 +2066,343 @@ static void focusUpdateValidityAndClear()
         }
     }
     focusClear(valid);
+}
+
+// -----------------------------------------------------------------------------
+// Barra dei comandi: sopra il pannello mostra i tasti utili in quel momento
+// ("(A) Parla con Seth  (X) Esamina  (Y) Inventario"). Disegnata nella vista
+// della mappa insieme ai testi fluttuanti, con i font e i colori del gioco.
+// -----------------------------------------------------------------------------
+
+struct HintItem {
+    const char* button;
+    std::string text;
+};
+
+static const int kHintHeight = 25;
+static const int kHintPillHeight = 17;
+static std::string gHintKey;
+static std::vector<unsigned char> gHintImage;
+static int gHintWidth = 0;
+static bool gHintVisible = false;
+static Rect gHintRect; // coordinate della finestra della mappa
+
+static unsigned char hintColor(int r, int g, int b)
+{
+    return colorTable[((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3)];
+}
+
+static std::string hintName(Object* object)
+{
+    char* name = object_name(object);
+    return name != nullptr ? name : "";
+}
+
+// Il verbo segue quello che fa davvero A (vedi focusUse).
+static std::string hintVerb(Object* object)
+{
+    std::string name = hintName(object);
+    switch (PID_TYPE(object->pid)) {
+    case OBJ_TYPE_ITEM:
+        if (item_get_type(object) == ITEM_TYPE_CONTAINER) {
+            return "Apri " + name;
+        }
+        return "Raccogli " + name;
+    case OBJ_TYPE_CRITTER:
+        if (critter_is_dead(object)) {
+            return "Perquisisci " + name;
+        }
+        if (obj_action_can_talk_to(object)) {
+            return "Parla con " + name;
+        }
+        return "Perquisisci " + name;
+    case OBJ_TYPE_SCENERY: {
+        Proto* proto;
+        int type = SCENERY_TYPE_GENERIC;
+        if (proto_ptr(object->pid, &proto) != -1) {
+            type = proto->scenery.type;
+        }
+        switch (type) {
+        case SCENERY_TYPE_DOOR:
+            return (obj_is_open(object) ? "Chiudi " : "Apri ") + name;
+        case SCENERY_TYPE_LADDER_UP:
+            return "Sali";
+        case SCENERY_TYPE_LADDER_DOWN:
+            return "Scendi";
+        default:
+            if (proto_action_can_use((object)->pid)) {
+                return "Usa " + name;
+            }
+            return "Esamina " + name;
+        }
+    }
+    }
+    return name;
+}
+
+static void hintsCollect(std::vector<HintItem>& items, bool isInCombatMode)
+{
+    if (!gMobile.buttonHints || !gPadMode || gMenuHold || game_ui_is_disabled()) {
+        return;
+    }
+
+    Context context = currentContext();
+    if (context != CONTEXT_MAP && context != CONTEXT_COMBAT) {
+        return;
+    }
+
+    int mode = gmouse_3d_get_mode();
+    Object* focus = (gFocus != nullptr && (gFocus != obj_dude || gIncludeDude)) ? gFocus : nullptr;
+
+    if (isSkillMode(mode) || mode == GAME_MOUSE_MODE_USE_CROSSHAIR) {
+        std::string text;
+        if (isSkillMode(mode)) {
+            char* skillName = skill_name(skillForMode(mode));
+            text = std::string("Usa ") + (skillName != nullptr ? skillName : "");
+        } else {
+            text = "Usa l'oggetto";
+        }
+        if (focus != nullptr) {
+            text += focus == obj_dude ? " su di te" : " su " + hintName(focus);
+            items.push_back({ "A", text });
+        }
+        items.push_back({ "RB", "Scegli" });
+        items.push_back({ "B", "Annulla" });
+        return;
+    }
+
+    if (isInCombatMode) {
+        if (mode == GAME_MOUSE_MODE_CROSSHAIR) {
+            std::string text = "Attacca";
+            if (gTargetCurrent != nullptr) {
+                text += " " + hintName(gTargetCurrent);
+            }
+            items.push_back({ "A", text });
+        } else if (gCombatHex != -1 && gCombatHex != obj_dude->tile) {
+            items.push_back({ "A", "Vai qui" });
+        }
+        items.push_back({ "RB", "Bersaglio" });
+        items.push_back({ "RT", "Fine turno" });
+        return;
+    }
+
+    if (focus == nullptr) {
+        return;
+    }
+
+    items.push_back({ "A", hintVerb(focus) });
+    items.push_back({ "X", "Esamina" });
+    items.push_back({ "Y", "Inventario" });
+}
+
+static int hintPillWidth(const char* button)
+{
+    int oldFont = text_curr();
+    text_font(strlen(button) > 1 ? 100 : 101);
+    int width = std::max(kHintPillHeight, text_width(button) + 10);
+    text_font(oldFont);
+    return width;
+}
+
+// Pulsantino metallico come quelli del pannello, con la lettera in verde.
+static void hintDrawPill(unsigned char* dest, int pitch, const char* button)
+{
+    int width = hintPillWidth(button);
+    int height = kHintPillHeight;
+    double radius = height / 2.0;
+    unsigned char black = hintColor(0, 0, 0);
+    unsigned char ring = hintColor(150, 130, 90);
+    unsigned char ringDark = hintColor(92, 80, 56);
+    unsigned char inner = hintColor(28, 26, 20);
+
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            double dx = std::max(0.0, fabs(x + 0.5 - width / 2.0) - (width / 2.0 - radius));
+            double dy = fabs(y + 0.5 - height / 2.0);
+            double d = sqrt(dx * dx + dy * dy);
+            unsigned char* pixel = dest + y * pitch + x;
+            if (d > radius) {
+                continue;
+            } else if (d > radius - 1.2) {
+                *pixel = black;
+            } else if (d > radius - 2.2) {
+                *pixel = ring;
+            } else if (d > radius - 3.2) {
+                *pixel = ringDark;
+            } else {
+                *pixel = inner;
+            }
+        }
+    }
+
+    int oldFont = text_curr();
+    text_font(strlen(button) > 1 ? 100 : 101);
+    int textWidth = text_width(button);
+    int textHeight = text_height();
+    text_to_buf(dest + ((height - textHeight) / 2) * pitch + (width - textWidth) / 2 + 1,
+        button, textWidth + 2, pitch, colorTable[992]);
+    text_font(oldFont);
+}
+
+static void hintsBuild(const std::vector<HintItem>& items, int maxWidth)
+{
+    int oldFont = text_curr();
+    text_font(101);
+
+    // Testi troppo lunghi (nomi degli oggetti): si accorciano con "...".
+    std::vector<std::string> texts;
+    for (const HintItem& item : items) {
+        texts.push_back(item.text);
+    }
+
+    auto totalWidth = [&]() {
+        int width = 16;
+        for (size_t i = 0; i < items.size(); i++) {
+            width += hintPillWidth(items[i].button) + 4 + text_width(texts[i].c_str());
+            if (i + 1 < items.size()) {
+                width += 12;
+            }
+        }
+        return width;
+    };
+
+    while (totalWidth() > maxWidth && !texts.empty() && texts[0].size() > 4) {
+        std::string& text = texts[0];
+        if (text.size() >= 3 && text.compare(text.size() - 3, 3, "...") == 0) {
+            text.erase(text.size() - 4, 1);
+        } else {
+            text.erase(text.size() - 1);
+            text += "...";
+        }
+    }
+
+    gHintWidth = totalWidth();
+    gHintImage.assign(gHintWidth * kHintHeight, hintColor(18, 20, 14));
+
+    // Cornice: nero fuori, bronzo dentro, ombra in basso a destra.
+    unsigned char black = hintColor(0, 0, 0);
+    unsigned char bronze = hintColor(120, 104, 72);
+    unsigned char shade = hintColor(60, 52, 36);
+    for (int x = 0; x < gHintWidth; x++) {
+        gHintImage[x] = black;
+        gHintImage[(kHintHeight - 1) * gHintWidth + x] = black;
+        if (x > 0 && x < gHintWidth - 1) {
+            gHintImage[gHintWidth + x] = bronze;
+            gHintImage[(kHintHeight - 2) * gHintWidth + x] = shade;
+        }
+    }
+    for (int y = 0; y < kHintHeight; y++) {
+        gHintImage[y * gHintWidth] = black;
+        gHintImage[y * gHintWidth + gHintWidth - 1] = black;
+        if (y > 0 && y < kHintHeight - 1) {
+            gHintImage[y * gHintWidth + 1] = bronze;
+            gHintImage[y * gHintWidth + gHintWidth - 2] = shade;
+        }
+    }
+
+    int x = 8;
+    int pillTop = (kHintHeight - kHintPillHeight) / 2;
+    int textTop = (kHintHeight - text_height()) / 2;
+    for (size_t i = 0; i < items.size(); i++) {
+        hintDrawPill(gHintImage.data() + pillTop * gHintWidth + x, gHintWidth, items[i].button);
+        x += hintPillWidth(items[i].button) + 4;
+        text_font(101);
+        int textWidth = text_width(texts[i].c_str());
+        text_to_buf(gHintImage.data() + textTop * gHintWidth + x, texts[i].c_str(), textWidth + 2, gHintWidth, colorTable[992] | FONT_SHADOW);
+        x += textWidth + 12;
+    }
+
+    text_font(oldFont);
+}
+
+static void hintsRefresh(Rect rect)
+{
+    Rect iso;
+    if (!isoWindowRect(&iso)) {
+        return;
+    }
+    tile_refresh_rect(&rect, map_elevation);
+}
+
+// Lo scorrimento della mappa sposta i pixel già disegnati, barra compresa:
+// si ridisegna la zona attorno alla barra per non lasciarne una copia.
+static void hintsAfterScroll()
+{
+    if (!gHintVisible) {
+        return;
+    }
+    Rect area = gHintRect;
+    area.ulx -= 40;
+    area.uly -= 40;
+    area.lrx += 40;
+    area.lry += 40;
+    tile_refresh_rect(&area, map_elevation);
+}
+
+static void hintsTick(bool isInCombatMode)
+{
+    std::vector<HintItem> items;
+    hintsCollect(items, isInCombatMode);
+
+    std::string key;
+    for (const HintItem& item : items) {
+        key += item.button;
+        key += '|';
+        key += item.text;
+        key += '|';
+    }
+
+    if (key == gHintKey) {
+        return;
+    }
+    gHintKey = key;
+
+    Rect old = gHintRect;
+    bool wasVisible = gHintVisible;
+
+    Rect iso;
+    if (items.empty() || !isoWindowRect(&iso)) {
+        gHintVisible = false;
+    } else {
+        int isoWidth = iso.lrx - iso.ulx + 1;
+        int isoHeight = iso.lry - iso.uly + 1;
+        hintsBuild(items, isoWidth - 16);
+        gHintRect.ulx = (isoWidth - gHintWidth) / 2;
+        gHintRect.uly = isoHeight - kHintHeight - 3;
+        gHintRect.lrx = gHintRect.ulx + gHintWidth - 1;
+        gHintRect.lry = gHintRect.uly + kHintHeight - 1;
+        gHintVisible = true;
+    }
+
+    if (wasVisible) {
+        hintsRefresh(old);
+    }
+    if (gHintVisible) {
+        hintsRefresh(gHintRect);
+    }
+}
+
+void gamepadHintsRender(Rect* rect, unsigned char* buffer, int pitch)
+{
+    if (!gHintVisible || !inGameLoop()) {
+        return;
+    }
+
+    Rect area = *rect;
+    Rect bar = gHintRect;
+    Rect clip;
+    clip.ulx = std::max(area.ulx, bar.ulx);
+    clip.uly = std::max(area.uly, bar.uly);
+    clip.lrx = std::min(area.lrx, bar.lrx);
+    clip.lry = std::min(area.lry, bar.lry);
+    if (clip.ulx > clip.lrx || clip.uly > clip.lry) {
+        return;
+    }
+
+    for (int y = clip.uly; y <= clip.lry; y++) {
+        const unsigned char* src = gHintImage.data() + (y - bar.uly) * gHintWidth + (clip.ulx - bar.ulx);
+        memcpy(buffer + y * pitch + clip.ulx, src, clip.lrx - clip.ulx + 1);
+    }
 }
 
 void gamepadPointerUsed()
@@ -2191,6 +2539,8 @@ void gamepadGameTick(bool isInCombatMode)
         gStickWasMoving = false;
         gStickLastTarget = -1;
     }
+
+    hintsTick(isInCombatMode);
 }
 
 } // namespace fallout

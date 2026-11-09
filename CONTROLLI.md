@@ -11,7 +11,10 @@ all'altro, in combattimento si scelgono bersagli ed esagoni.
 ## Sulla mappa
 
 Il gioco evidenzia (contorno giallo) la persona o l'oggetto più vicino nella
-direzione in cui ti muovi e ne scrive il nome nella console.
+direzione in cui ti muovi e ne scrive il nome nella console. Sopra il
+pannello una barra mostra i tasti utili in quel momento (es. "A Parla con
+Seth · X Esamina · Y Inventario"; in combattimento "A Attacca · RB Bersaglio ·
+RT Fine turno").
 
 | Comando | Azione |
 |---|---|
@@ -108,4 +111,5 @@ gamepad_cursor_speed=100  ; velocità del cursore libero, in % (25-400)
 gamepad_deadzone=20       ; zona morta degli stick, in % (5-60)
 camera_follow=1           ; la visuale segue il personaggio
 stick_movement=1          ; 1 = stick sinistro muove il personaggio, 0 = cursore
+button_hints=1            ; 1 = barra con i tasti da premere sopra il pannello, 0 = nascosta
 ```

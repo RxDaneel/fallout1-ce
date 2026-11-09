@@ -3,6 +3,8 @@
 
 #include <SDL.h>
 
+#include "plib/gnw/rect.h"
+
 namespace fallout {
 
 // Controlli mobile: controller (SDL_GameController) e tocco diretto.
@@ -43,6 +45,10 @@ bool gamepadSnapPoint(int* x, int* y);
 // Clic intelligente (vedi gamepad.cc). false = non cliccare, è cambiato solo
 // il cursore e serve un secondo tocco per confermare.
 bool gamepadSmartClick(int x, int y);
+
+// Barra dei comandi: disegna nella vista della mappa (chiamata dove il gioco
+// disegna i testi fluttuanti; rect e buffer in coordinate della finestra).
+void gamepadHintsRender(Rect* rect, unsigned char* buffer, int pitch);
 
 } // namespace fallout
 

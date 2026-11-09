@@ -10,6 +10,7 @@
 #include "game/combat.h"
 #include "game/critter.h"
 #include "game/game.h"
+#include "game/gamepad.h"
 #include "game/gconfig.h"
 #include "game/gmouse.h"
 #include "game/item.h"
@@ -907,6 +908,7 @@ void obj_render_post_roof(Rect* rect, int elevation)
     }
 
     text_object_render(&updatedRect);
+    gamepadHintsRender(&updatedRect, back_buf, buf_full);
 
     ObjectListNode* objectListNode = floatingObjects;
     while (objectListNode != NULL) {
