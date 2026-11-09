@@ -10,21 +10,23 @@ all'altro, in combattimento si scelgono bersagli ed esagoni.
 
 ## Sulla mappa
 
-Il gioco evidenzia (contorno giallo) la persona o l'oggetto più vicino nella
-direzione in cui ti muovi e ne scrive il nome nella console. Sopra il
+Lo stick sinistro sposta un esagono, un passo alla volta come in
+combattimento; A porta il personaggio lì (cammina se è vicino, corre se è
+lontano). Se sull'esagono c'è una persona o un oggetto, viene evidenziato
+(contorno giallo) e A ci interagisce. Sopra il
 pannello una barra mostra i tasti utili in quel momento (es. "A Parla con
 Seth · X Esamina · Y Inventario"; in combattimento "A Attacca · RB Bersaglio ·
 RT Fine turno").
 
 | Comando | Azione |
 |---|---|
-| Stick sinistro | Muove il personaggio (a fondo corsa corre); la visuale segue |
+| Stick sinistro | Sposta l'esagono di arrivo (più lo spingi, più va veloce); la visuale lo segue |
 | Stick destro | Sposta la visuale |
-| A | Azione sull'oggetto evidenziato: parla, apri, perquisisci, raccogli |
+| A | Vai all'esagono, oppure azione sull'oggetto evidenziato: parla, apri, perquisisci, raccogli |
 | A tenuto premuto | Menu azioni (guarda, usa, oggetto, abilità...): croce ↑↓ per scegliere, rilascia A per confermare |
 | X | Esamina l'oggetto evidenziato |
-| LB / RB | Evidenzia l'oggetto precedente / successivo attorno a te |
-| B | Annulla (es. un'abilità scelta dallo Skilldex) |
+| LB / RB | Salta all'oggetto precedente / successivo attorno a te |
+| B | Annulla: toglie l'esagono (o l'abilità scelta dallo Skilldex) |
 | Y | Inventario |
 | Croce ↑ ↓ ← → | Pip-Boy, Personaggio, Abilità (Skilldex), Automappa |
 | LT | Cambia mano attiva |
@@ -111,6 +113,7 @@ gamepad_cursor_speed=100  ; velocità del cursore libero, in % (25-400)
 gamepad_deadzone=20       ; zona morta degli stick, in % (5-60)
 camera_follow=1           ; la visuale segue il personaggio
 stick_movement=1          ; 1 = stick sinistro muove il personaggio, 0 = cursore
+hex_movement=1            ; 1 = scegli l'esagono e premi A, 0 = il personaggio segue lo stick
 button_hints=1            ; 1 = barra con i tasti da premere sopra il pannello, 0 = nascosta
 ```
 

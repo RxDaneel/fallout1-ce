@@ -58,6 +58,7 @@ struct MobileSettings {
     int deadzone = 20; // zona morta degli stick, in %
     bool cameraFollow = true; // la visuale segue il personaggio
     bool stickMovement = true; // stick sinistro = muovi il personaggio
+    bool hexMovement = true; // ...scegliendo l'esagono di arrivo (A per andarci)
     bool buttonHints = true; // barra con i tasti da premere
 };
 
@@ -80,6 +81,7 @@ static void mobileSettingsLoad()
     if (config_get_value(&game_config, "mobile", "gamepad_deadzone", &value)) gMobile.deadzone = std::clamp(value, 5, 60);
     if (config_get_value(&game_config, "mobile", "camera_follow", &value)) gMobile.cameraFollow = value != 0;
     if (config_get_value(&game_config, "mobile", "stick_movement", &value)) gMobile.stickMovement = value != 0;
+    if (config_get_value(&game_config, "mobile", "hex_movement", &value)) gMobile.hexMovement = value != 0;
     if (config_get_value(&game_config, "mobile", "button_hints", &value)) gMobile.buttonHints = value != 0;
 }
 
@@ -1832,7 +1834,10 @@ static void hexCenter(int tile, int* x, int* y)
     *y += 8;
 }
 
-static void combatStickTick()
+// Sposta l'esagono scelto di un passo nella direzione dello stick. Vale in
+// combattimento e, con hex_movement, anche in esplorazione (lì più veloce).
+// Restituisce true se l'esagono si è spostato.
+static bool hexStep(bool explore)
 {
     double nx;
     double ny;
@@ -1841,13 +1846,14 @@ static void combatStickTick()
 
     if (magnitude < 0.5) {
         gCombatStickActive = false;
-        return;
+        return false;
     }
 
     if (gCombatStickActive && now < gCombatHexNext) {
-        return;
+        return false;
     }
-    gCombatHexNext = now + (gCombatStickActive ? 170 : 300);
+    Uint32 repeat = explore ? (Uint32)(170 - 100 * magnitude) : 170;
+    gCombatHexNext = now + (gCombatStickActive ? repeat : (explore ? 240 : 300));
     gCombatStickActive = true;
 
     // Si parte dal personaggio se si è mosso o se non c'è una scelta.
@@ -1891,7 +1897,7 @@ static void combatStickTick()
         }
     }
     if (bestRotation == -1) {
-        return;
+        return false;
     }
     // Su e giù cadono a metà tra due lati: si alterna per andare dritti.
     if (secondRotation != -1 && bestDot - secondDot < 0.08 && bestRotation == gCombatHexLastDir) {
@@ -1901,10 +1907,17 @@ static void combatStickTick()
 
     int next = tile_num_in_direction(gCombatHex, bestRotation, 1);
     if (next == -1) {
-        return;
+        return false;
     }
     gCombatHex = next;
+    return true;
+}
 
+static void combatStickTick()
+{
+    if (!hexStep(false)) {
+        return;
+    }
     gmouse_3d_set_mode(GAME_MOUSE_MODE_MOVE);
     gWarpPending = true;
     hexCenter(gCombatHex, &gWarpX, &gWarpY);
@@ -1964,12 +1977,10 @@ static void issueMove(int tile, bool run)
 // niente scatti quando si passa da una zona all'altra della mappa.
 static Uint32 gFollowUntil = 0;
 
-static void followCamera()
+// Scorre la visuale di un passo se il punto (x, y) esce dalla zona centrale
+// (larga 2/deadDiv della vista).
+static void followPoint(int tile, int deadDiv)
 {
-    if (!gMobile.cameraFollow) {
-        return;
-    }
-
     Rect view;
     if (!isoVisibleRect(&view)) {
         return;
@@ -1977,7 +1988,7 @@ static void followCamera()
 
     int x;
     int y;
-    if (tile_coord(obj_dude->tile, &x, &y, obj_dude->elevation) == -1) {
+    if (tile_coord(tile, &x, &y, obj_dude->elevation) == -1) {
         return;
     }
     x += 16;
@@ -1987,8 +1998,8 @@ static void followCamera()
     int height = view.lry - view.uly;
     int dx = x - (view.ulx + width / 2);
     int dy = y - (view.uly + height / 2);
-    int deadX = width / 7;
-    int deadY = height / 7;
+    int deadX = width / deadDiv;
+    int deadY = height / deadDiv;
 
     int stepX = dx > deadX ? 1 : (dx < -deadX ? -1 : 0);
     int stepY = dy > deadY ? 1 : (dy < -deadY ? -1 : 0);
@@ -1996,10 +2007,10 @@ static void followCamera()
         return;
     }
 
-    // Personaggio uscito del tutto dalla vista (cambio piano, teletrasporto):
+    // Punto uscito del tutto dalla vista (cambio piano, teletrasporto):
     // lì conviene ricentrare subito.
     if (abs(dx) > width / 2 || abs(dy) > height / 2) {
-        tile_scroll_to(obj_dude->tile, 2);
+        tile_scroll_to(tile, 2);
         return;
     }
 
@@ -2008,6 +2019,13 @@ static void followCamera()
     hintsAfterScroll();
     if (wasVisible && !gmouse_3d_is_on()) {
         gmouse_3d_on();
+    }
+}
+
+static void followCamera()
+{
+    if (gMobile.cameraFollow) {
+        followPoint(obj_dude->tile, 7);
     }
 }
 
@@ -2067,6 +2085,131 @@ static void stickMovementTick()
 
     gStickWasMoving = true;
     gFollowUntil = now + 1500;
+}
+
+// -----------------------------------------------------------------------------
+// Esplorazione a esagoni (hex_movement): lo stick sposta un esagono come in
+// combattimento, A ci porta il personaggio. Se sull'esagono c'è una persona o
+// un oggetto, viene evidenziato e A ci interagisce.
+// -----------------------------------------------------------------------------
+
+static bool gHexShown = false;
+
+static Object* objectOnHex(const std::vector<Candidate>& candidates, int hex)
+{
+    Object* best = nullptr;
+    int bestRank = 99;
+    for (const Candidate& candidate : candidates) {
+        Object* object = candidate.object;
+        if (object->tile != hex) {
+            continue;
+        }
+        if (object == obj_dude && !gIncludeDude) {
+            continue;
+        }
+        int rank = 3;
+        if (PID_TYPE(object->pid) == OBJ_TYPE_CRITTER) {
+            rank = critter_is_dead(object) ? 1 : 0;
+        } else if (PID_TYPE(object->pid) == OBJ_TYPE_ITEM) {
+            rank = 2;
+        }
+        if (rank < bestRank) {
+            bestRank = rank;
+            best = object;
+        }
+    }
+    return best;
+}
+
+static bool hexModeActive()
+{
+    return gMobile.stickMovement && gMobile.hexMovement;
+}
+
+static void exploreHexTick()
+{
+    gIncludeDude = isSkillMode(gmouse_3d_get_mode());
+
+    std::vector<Candidate> candidates;
+    collectCandidates(candidates, false);
+
+    if (gFocus != nullptr) {
+        bool valid = false;
+        for (const Candidate& candidate : candidates) {
+            if (candidate.object == gFocus) {
+                valid = true;
+                break;
+            }
+        }
+        if (!valid) {
+            gFocusOutlined = false;
+            focusClear(false);
+        }
+    }
+
+    bool moved = !game_ui_is_disabled() && hexStep(true);
+    if (moved) {
+        gFocusManual = false;
+        followPoint(gCombatHex, 3);
+    } else if (SDL_GetTicks() < gFollowUntil) {
+        if (anim_busy(obj_dude)) {
+            gFollowUntil = SDL_GetTicks() + 300;
+        }
+        followCamera();
+    }
+
+    // Arrivato: l'esagono sparisce (si riparte da te alla prossima mossa).
+    if (gCombatHex != -1 && gCombatHex == obj_dude->tile && !gIncludeDude && !moved) {
+        gCombatHex = -1;
+    }
+
+    if (!gFocusManual) {
+        focusSet(gCombatHex != -1 ? objectOnHex(candidates, gCombatHex) : nullptr);
+    }
+
+    gHexShown = gCombatHex != -1 && gFocus == nullptr && !gMenuHold;
+    if (gHexShown) {
+        if (gmouse_3d_get_mode() != GAME_MOUSE_MODE_MOVE) {
+            gmouse_3d_set_mode(GAME_MOUSE_MODE_MOVE);
+        }
+        if (!gmouse_3d_is_on()) {
+            gmouse_3d_on();
+        }
+        int x;
+        int y;
+        hexCenter(gCombatHex, &x, &y);
+        int mouseX;
+        int mouseY;
+        mouse_get_position(&mouseX, &mouseY);
+        if (abs(mouseX - x) > 1 || abs(mouseY - y) > 1) {
+            gWarpPending = true;
+            gWarpX = x;
+            gWarpY = y;
+        }
+    } else {
+        if (!gMenuHold && gmouse_3d_is_on()) {
+            gmouse_3d_off();
+            gWeHidMapCursor = true;
+        }
+        if (gmouse_3d_get_mode() == GAME_MOUSE_MODE_MOVE || gmouse_3d_get_mode() == GAME_MOUSE_MODE_CROSSHAIR) {
+            gmouse_3d_set_mode(GAME_MOUSE_MODE_ARROW);
+        }
+        if (!gMenuHold) {
+            focusParkCursor();
+        }
+    }
+}
+
+// A senza niente di evidenziato: cammina fino all'esagono (corre se è lontano).
+static bool exploreHexWalk()
+{
+    if (gCombatHex == -1 || gCombatHex == obj_dude->tile) {
+        return false;
+    }
+    issueMove(gCombatHex, tile_dist(obj_dude->tile, gCombatHex) > 4);
+    gCombatHexOrigin = -1; // la prossima mossa dello stick riparte da te
+    gFollowUntil = SDL_GetTicks() + 1500;
+    return true;
 }
 
 // Toglie l'evidenziazione controllando prima che l'oggetto sia ancora sulla
@@ -2205,6 +2348,11 @@ static void hintsCollect(std::vector<HintItem>& items, bool isInCombatMode)
     }
 
     if (focus == nullptr) {
+        if (hexModeActive() && gCombatHex != -1 && gCombatHex != obj_dude->tile) {
+            items.push_back({ "A", tile_dist(obj_dude->tile, gCombatHex) > 4 ? "Corri qui" : "Vai qui" });
+            items.push_back({ "RB", "Oggetti vicini" });
+            items.push_back({ "B", "Annulla" });
+        }
         return;
     }
 
@@ -2479,6 +2627,9 @@ void gamepadGameTick(bool isInCombatMode)
         gmouse_set_cursor(MOUSE_CURSOR_NONE);
         gmouse_3d_set_mode(pointerless ? GAME_MOUSE_MODE_ARROW : GAME_MOUSE_MODE_MOVE);
         gCombatHex = -1;
+        if (pointerless && hexModeActive()) {
+            focusSet(nullptr);
+        }
     }
 
     if (!pointerless) {
@@ -2490,6 +2641,15 @@ void gamepadGameTick(bool isInCombatMode)
             gmouse_3d_on();
             gWeHidMapCursor = false;
         }
+    } else if (hexModeActive()) {
+        exploreHexTick();
+        if (gFocusNameDue != 0 && SDL_GetTicks() >= gFocusNameDue) {
+            gFocusNameDue = 0;
+            if (gFocus != nullptr && gFocus != obj_dude) {
+                obj_look_at(obj_dude, gFocus);
+            }
+        }
+        cameraStickTick();
     } else {
         if (!gMenuHold && gmouse_3d_is_on()) {
             gmouse_3d_off();
@@ -2522,6 +2682,11 @@ void gamepadGameTick(bool isInCombatMode)
         if (pointerless) {
             focusSet(gTargetCurrent);
             gFocusManual = gFocus != nullptr;
+            if (gFocus != nullptr && hexModeActive()) {
+                // L'esagono salta sull'oggetto scelto: lo stick riparte da lì.
+                gCombatHex = gFocus->tile;
+                gCombatHexOrigin = obj_dude->tile;
+            }
         }
         gPendingTargetStep = 0;
     }
@@ -2529,7 +2694,11 @@ void gamepadGameTick(bool isInCombatMode)
     if (gPendingUse) {
         gPendingUse = false;
         if (pointerless) {
-            focusUse();
+            if (gFocus == nullptr && hexModeActive()) {
+                exploreHexWalk();
+            } else {
+                focusUse();
+            }
         }
     }
 
@@ -2545,7 +2714,7 @@ void gamepadGameTick(bool isInCombatMode)
         cameraStickTick();
     }
 
-    if (!isInCombatMode && gMobile.stickMovement && !game_ui_is_disabled()) {
+    if (!isInCombatMode && gMobile.stickMovement && !hexModeActive() && !game_ui_is_disabled()) {
         stickMovementTick();
         if (SDL_GetTicks() < gFollowUntil) {
             if (anim_busy(obj_dude)) {
