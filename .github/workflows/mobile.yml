@@ -81,6 +81,9 @@ jobs:
   release:
     name: Pubblica
     needs: [android, ios]
+    # Gli APK escono anche se la build iOS fallisce o viene annullata
+    # (i runner macOS a volte restano in coda): in quel caso resta l'ultimo .ipa.
+    if: ${{ always() && needs.android.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -96,7 +99,11 @@ jobs:
         run: |
           mkdir -p out
           cp dist/fallout-ce-android-controlli/*.apk out/fallout-ce-controlli-android.apk
-          cp dist/fallout-ce-ios-controlli/*.ipa out/fallout-ce-controlli-ios.ipa
+          if ls dist/fallout-ce-ios-controlli/*.ipa >/dev/null 2>&1; then
+            cp dist/fallout-ce-ios-controlli/*.ipa out/fallout-ce-controlli-ios.ipa
+          else
+            gh release download controlli-latest --repo "$GITHUB_REPOSITORY" -p '*.ipa' -D out || true
+          fi
           gh release delete controlli-latest --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
           gh release create controlli-latest out/* \
             --repo "$GITHUB_REPOSITORY" \
