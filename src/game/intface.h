@@ -29,6 +29,12 @@ typedef enum InterfaceItemAction {
 } InterfaceItemAction;
 
 extern int interfaceWindow;
+
+// CE: come IFACE_BAR_MODE di Fallout 2 (f1_res.ini, sezione [IFACE]):
+// 1 = la mappa continua dietro il pannello, niente zone nere ai lati.
+extern bool gInterfaceBarMode;
+int interfaceIsoWindowHeight();
+bool interfaceMouseClickInIsoView();
 extern int bar_window;
 
 int intface_init();

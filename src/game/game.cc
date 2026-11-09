@@ -164,6 +164,8 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
                 video_options.height = std::max(screenHeight, 480);
             }
 
+            configGetBool(&resolutionConfig, "IFACE", "IFACE_BAR_MODE", &gInterfaceBarMode);
+
             bool windowed;
             if (configGetBool(&resolutionConfig, "MAIN", "WINDOWED", &windowed)) {
                 video_options.fullscreen = !windowed;

@@ -30,6 +30,7 @@
 #include "plib/gnw/button.h"
 #include "plib/gnw/debug.h"
 #include "plib/gnw/gnw.h"
+#include "plib/gnw/mouse.h"
 #include "plib/gnw/grbuf.h"
 #include "plib/gnw/input.h"
 #include "plib/gnw/memory.h"
@@ -268,6 +269,8 @@ static IndicatorDescription bbox[INDICATOR_COUNT] = {
 };
 
 // 0x50560C
+bool gInterfaceBarMode = false;
+
 int interfaceWindow = -1;
 
 // 0x505610
@@ -2608,6 +2611,29 @@ bool disable_box_bar_win()
     refresh_box_bar_win();
 
     return oldIsVisible;
+}
+
+int interfaceIsoWindowHeight()
+{
+    return screenGetHeight() - (gInterfaceBarMode ? 0 : INTERFACE_BAR_HEIGHT);
+}
+
+// Il clic cade sulla vista della mappa (e non sul pannello)?
+bool interfaceMouseClickInIsoView()
+{
+    if (!mouse_click_in(0, 0, screenGetWidth() - 1, interfaceIsoWindowHeight() - 1)) {
+        return false;
+    }
+
+    if (gInterfaceBarMode && interfaceWindow != -1) {
+        Rect rect;
+        win_get_rect(interfaceWindow, &rect);
+        if (mouse_click_in(rect.ulx, rect.uly, rect.lrx, rect.lry)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 } // namespace fallout

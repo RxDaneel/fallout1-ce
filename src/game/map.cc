@@ -279,7 +279,7 @@ int iso_init()
     // NOTE: Uninline.
     square_init();
 
-    display_win = win_add(0, 0, screenGetWidth(), screenGetHeight() - INTERFACE_BAR_HEIGHT, 256, 10);
+    display_win = win_add(0, 0, screenGetWidth(), interfaceIsoWindowHeight(), 256, 10);
     if (display_win == -1) {
         debug_printf("win_add failed in iso_init\n");
         return -1;
@@ -303,14 +303,14 @@ int iso_init()
 
     debug_printf(">art_init\t\t");
 
-    if (tile_init(square, SQUARE_GRID_WIDTH, SQUARE_GRID_HEIGHT, HEX_GRID_WIDTH, HEX_GRID_HEIGHT, display_buf, scr_size.lrx - scr_size.ulx + 1, scr_size.lry - scr_size.uly - 99, scr_size.lrx - scr_size.ulx + 1, map_display_draw) != 0) {
+    if (tile_init(square, SQUARE_GRID_WIDTH, SQUARE_GRID_HEIGHT, HEX_GRID_WIDTH, HEX_GRID_HEIGHT, display_buf, scr_size.lrx - scr_size.ulx + 1, interfaceIsoWindowHeight(), scr_size.lrx - scr_size.ulx + 1, map_display_draw) != 0) {
         debug_printf("tile_init failed in iso_init\n");
         return -1;
     }
 
     debug_printf(">tile_init\t\t");
 
-    if (obj_init(display_buf, scr_size.lrx - scr_size.ulx + 1, scr_size.lry - scr_size.uly - 99, scr_size.lrx - scr_size.ulx + 1) != 0) {
+    if (obj_init(display_buf, scr_size.lrx - scr_size.ulx + 1, interfaceIsoWindowHeight(), scr_size.lrx - scr_size.ulx + 1) != 0) {
         debug_printf("obj_init failed in iso_init\n");
         return -1;
     }
@@ -750,7 +750,7 @@ int map_scroll(int dx, int dy)
 
     int width = scr_size.lrx - scr_size.ulx + 1;
     int pitch = width;
-    int height = scr_size.lry - scr_size.uly - 99;
+    int height = interfaceIsoWindowHeight();
 
     if (screenDx != 0) {
         width -= 32;
@@ -772,7 +772,7 @@ int map_scroll(int dx, int dy)
     if (screenDy < 0) {
         r1.lry = r1.uly - screenDy;
         src = display_buf + pitch * (height - 1);
-        dest = display_buf + pitch * (scr_size.lry - scr_size.uly - 100);
+        dest = display_buf + pitch * (interfaceIsoWindowHeight() - 1);
         if (screenDx < 0) {
             dest -= screenDx;
         } else {

@@ -1473,7 +1473,7 @@ int pick_hex()
         return -1;
     }
 
-    if (!mouse_click_in(0, 0, scr_size.lrx - scr_size.ulx, scr_size.lry - scr_size.uly - 100)) {
+    if (!interfaceMouseClickInIsoView()) {
         return -1;
     }
 

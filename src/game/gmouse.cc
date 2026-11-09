@@ -702,7 +702,7 @@ void gmouse_bk_process()
                     }
 
                     if (primaryAction != -1) {
-                        if (gmouse_3d_build_pick_frame(mouseX, mouseY, primaryAction, scr_size.lrx - scr_size.ulx + 1, scr_size.lry - scr_size.uly - 99) == 0) {
+                        if (gmouse_3d_build_pick_frame(mouseX, mouseY, primaryAction, scr_size.lrx - scr_size.ulx + 1, interfaceIsoWindowHeight()) == 0) {
                             Rect tmp;
                             int fid = art_id(OBJ_TYPE_INTERFACE, 282, 0, 0, 0);
                             // NOTE: Uninline.
@@ -855,7 +855,7 @@ void gmouse_handle_event(int mouseX, int mouseY, int mouseState)
         }
     }
 
-    if (!mouse_click_in(0, 0, scr_size.lrx - scr_size.ulx, scr_size.lry - scr_size.uly - 100)) {
+    if (!interfaceMouseClickInIsoView()) {
         return;
     }
 
@@ -1061,7 +1061,7 @@ void gmouse_handle_event(int mouseX, int mouseY, int mouseState)
                 break;
             }
 
-            if (gmouse_3d_build_menu_frame(mouseX, mouseY, actionMenuItems, actionMenuItemsCount, scr_size.lrx - scr_size.ulx + 1, scr_size.lry - scr_size.uly - 99) == 0) {
+            if (gmouse_3d_build_menu_frame(mouseX, mouseY, actionMenuItems, actionMenuItemsCount, scr_size.lrx - scr_size.ulx + 1, interfaceIsoWindowHeight()) == 0) {
                 Rect v43;
                 int fid = art_id(OBJ_TYPE_INTERFACE, 283, 0, 0, 0);
                 // NOTE: Uninline.

@@ -113,3 +113,6 @@ camera_follow=1           ; la visuale segue il personaggio
 stick_movement=1          ; 1 = stick sinistro muove il personaggio, 0 = cursore
 button_hints=1            ; 1 = barra con i tasti da premere sopra il pannello, 0 = nascosta
 ```
+
+In f1_res.ini / f2_res.ini, sezione `[IFACE]`, `IFACE_BAR_MODE=1` fa continuare la mappa
+dietro il pannello: niente zone nere ai lati sugli schermi larghi (l'installer lo attiva da solo).
