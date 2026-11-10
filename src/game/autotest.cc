@@ -51,6 +51,7 @@ static int gMouseX = 0;
 static int gMouseY = 0;
 static int gClickFrames = 0;
 static int gClickButtons = 0;
+static bool gMouseHeld = false; // mousedown / mouseup (trascinamenti)
 static int gReleaseFrames = 0;
 static int gPadTapButton = -1;
 static int gPadTapFrames = 0;
@@ -212,6 +213,16 @@ void autotestTick()
             gClickButtons = strcmp(arg3, "right") == 0 ? MOUSE_STATE_RIGHT_BUTTON_DOWN : MOUSE_STATE_LEFT_BUTTON_DOWN;
             gClickFrames = 3;
             return;
+        } else if (strcmp(command, "mousedown") == 0) {
+            gMousePending = true;
+            gMouseX = atoi(arg1);
+            gMouseY = atoi(arg2);
+            gMouseHeld = true;
+            return;
+        } else if (strcmp(command, "mouseup") == 0) {
+            gMouseHeld = false;
+            gReleaseFrames = 3;
+            return;
         } else if (strcmp(command, "pad") == 0) {
             int state = 2;
             if (strcmp(arg2, "down") == 0) state = 1;
@@ -255,7 +266,9 @@ void autotestGetMouseInput(int* dx, int* dy, int* buttons)
         gMousePending = false;
     }
 
-    if (gClickFrames > 0) {
+    if (gMouseHeld) {
+        *buttons = MOUSE_STATE_LEFT_BUTTON_DOWN;
+    } else if (gClickFrames > 0) {
         gClickFrames--;
         *buttons = gClickButtons;
         if (gClickFrames == 0) {
