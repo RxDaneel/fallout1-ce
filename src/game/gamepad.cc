@@ -32,6 +32,7 @@
 #include "game/party.h"
 #include "game/proto.h"
 #include "game/protinst.h"
+#include "game/scripts.h"
 #include "game/skill.h"
 #include "game/skill_defs.h"
 #include "game/tile.h"
@@ -1568,6 +1569,34 @@ static void cycleTarget(int step, bool combat)
 // Modalità senza puntatore: oggetto evidenziato
 // -----------------------------------------------------------------------------
 
+// Si può parlare davvero solo con chi ha un dialogo nel suo script: per il
+// gioco ogni creatura "può parlare", anche un ratto.
+static bool critterCanTalk(Object* critter)
+{
+    if (!obj_action_can_talk_to(critter) || critter->sid == -1) {
+        return false;
+    }
+    Script* script;
+    if (scr_ptr(critter->sid, &script) == -1) {
+        return false;
+    }
+    return script->procs[SCRIPT_PROC_TALK] != SCRIPT_PROC_NO_PROC;
+}
+
+// Persone (uomini, donne, bambini, mutanti, ghoul): senza dialogo A le
+// esamina e basta, così in città non parte mai un combattimento per sbaglio.
+static bool critterIsPerson(Object* critter)
+{
+    int killType = critter_kill_count_type(critter);
+    return killType >= KILL_TYPE_MAN && killType <= KILL_TYPE_GHOUL;
+}
+
+// A su una creatura con cui non si parla: parte il combattimento con lei già
+// nel mirino (al primo turno utile), poi A spara.
+static Object* gPendingAttackTarget = nullptr;
+static void focusLook();
+static Uint32 gPendingAttackUntil = 0;
+
 static bool isSkillMode(int mode)
 {
     return mode >= FIRST_GAME_MOUSE_MODE_SKILL && mode < GAME_MOUSE_MODE_COUNT;
@@ -1780,8 +1809,15 @@ static void focusUse()
         if (target == obj_dude) {
             break;
         }
-        if (obj_action_can_talk_to(target)) {
+        if (critterCanTalk(target)) {
             action_talk_to(obj_dude, target);
+        } else if (!critter_is_dead(target) && critterIsPerson(target)) {
+            focusLook();
+        } else if (!critter_is_dead(target)) {
+            gPendingAttackTarget = target;
+            gPendingAttackUntil = SDL_GetTicks() + 4000;
+            inputInjectKey(SDL_SCANCODE_A, true); // inizia il combattimento
+            inputInjectKey(SDL_SCANCODE_A, false);
         } else {
             action_loot_container(obj_dude, target);
         }
@@ -2274,10 +2310,13 @@ static std::string hintVerb(Object* object)
         if (critter_is_dead(object)) {
             return "Perquisisci " + name;
         }
-        if (obj_action_can_talk_to(object)) {
+        if (critterCanTalk(object)) {
             return "Parla con " + name;
         }
-        return "Perquisisci " + name;
+        if (critterIsPerson(object)) {
+            return "Esamina " + name;
+        }
+        return "Attacca " + name;
     case OBJ_TYPE_SCENERY: {
         Proto* proto;
         int type = SCENERY_TYPE_GENERIC;
@@ -2726,6 +2765,26 @@ void gamepadGameTick(bool isInCombatMode)
             }
         }
         cameraStickTick();
+    }
+
+    if (gPendingAttackTarget != nullptr) {
+        if (SDL_GetTicks() > gPendingAttackUntil) {
+            gPendingAttackTarget = nullptr;
+        } else if (isInCombatMode && !game_ui_is_disabled()) {
+            std::vector<Candidate> candidates;
+            collectCandidates(candidates, true);
+            for (const Candidate& candidate : candidates) {
+                if (candidate.object == gPendingAttackTarget) {
+                    gTargetCurrent = candidate.object;
+                    gCombatHex = -1;
+                    gWarpPending = true;
+                    objectAimPoint(gTargetCurrent, &gWarpX, &gWarpY);
+                    gmouse_3d_set_mode(GAME_MOUSE_MODE_CROSSHAIR);
+                    break;
+                }
+            }
+            gPendingAttackTarget = nullptr;
+        }
     }
 
     if (gPendingTargetStep != 0) {

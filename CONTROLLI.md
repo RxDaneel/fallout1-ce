@@ -13,7 +13,9 @@ all'altro, in combattimento si scelgono bersagli ed esagoni.
 Lo stick sinistro sposta un esagono, un passo alla volta come in
 combattimento; A porta il personaggio lì (cammina se è vicino, corre se è
 lontano). Se sull'esagono c'è una persona o un oggetto, viene evidenziato
-(contorno giallo) e A ci interagisce. Sopra il
+(contorno giallo) e A ci interagisce: parla con chi ha qualcosa da dire,
+esamina le persone senza dialogo, e con animali e creature fa partire il
+combattimento con loro già nel mirino (poi A spara). Sopra il
 pannello una barra mostra i tasti utili in quel momento (es. "A Parla con
 Seth · X Esamina · Y Inventario"; in combattimento "A Attacca · RB Bersaglio ·
 RT Fine turno").
