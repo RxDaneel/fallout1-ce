@@ -34,6 +34,7 @@ void gamepadDebugDumpNav(const char* name);
 void gamepadDebugEmptyWeapon();
 void gamepadDebugGotoExit();
 void gamepadDebugState();
+void gamepadDebugHurt();
 #endif
 
 // Impostazioni [mobile] di fallout.cfg.

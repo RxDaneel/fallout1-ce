@@ -245,6 +245,8 @@ void autotestTick()
             gamepadDebugGotoExit();
         } else if (strcmp(command, "state") == 0) {
             gamepadDebugState();
+        } else if (strcmp(command, "hurt") == 0) {
+            gamepadDebugHurt();
         } else if (strcmp(command, "noammo") == 0) {
             gamepadDebugEmptyWeapon();
         } else if (strcmp(command, "quit") == 0) {

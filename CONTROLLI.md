@@ -127,6 +127,8 @@ dietro il pannello: niente zone nere ai lati sugli schermi larghi (l'installer l
 - **Inventario, bottino, baratto**: un tocco di A sposta l'oggetto dove serve
   (in mano o addosso, di nuovo nello zaino, da una colonna all'altra). Con più
   pezzi si apre "Sposta oggetti" già su "tutto": un altro A conferma.
+- **Inventario**: X su un oggetto lo usa subito (stimpak, cibo, droghe,
+  torce...), senza menu azioni.
 - **Combattimento**: al tuo turno il mirino va da solo sul nemico più vicino
   che ti sta attaccando; con l'arma scarica A ricarica.
 - **Esplorazione**: la barra avvisa se la casella scelta non è raggiungibile

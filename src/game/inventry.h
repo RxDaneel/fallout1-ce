@@ -95,6 +95,10 @@ int inven_set_timer(Object* a1);
 int inventoryQuickMoveWindowType();
 // (topWindow: la finestra visibile più in alto, deve essere quella dell'inventario)
 bool inventoryQuickMoveTarget(int topWindow, int* outX, int* outY);
+// Controller: X usa subito l'oggetto sotto il cursore (inventario normale).
+int inventoryWindowId();
+bool inventoryQuickUseRequest();
+void inventoryQuickUseCancel();
 int inventoryQuantityWindow();
 bool inventoryQuickMoveHome(int* outX, int* outY);
 

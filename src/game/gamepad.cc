@@ -113,6 +113,7 @@ enum Action {
     ACTION_KEY_TAP, // pressione + rilascio immediati
     ACTION_MOUSE_LEFT,
     ACTION_MOUSE_RIGHT,
+    ACTION_INV_USE, // X nell'inventario: usa subito l'oggetto
     ACTION_TARGET_PREV,
     ACTION_TARGET_NEXT,
     ACTION_CANCEL_MODE,
@@ -155,6 +156,7 @@ static Uint32 gLeftPressedAt = 0;
 static bool gLeftMovedSincePress = false;
 static int gLeftDownPolls = 0; // letture dell'input con il tasto giù
 static bool gQuickDropPending = false;
+static Uint32 gInvUseCancelAt = 0; // X nell'inventario senza oggetto sotto
 static int gQuickDropX = 0;
 static int gQuickDropY = 0;
 static Uint32 gQuickDropUntil = 0; // tasto tenuto giù sulla destinazione fino a qui
@@ -446,6 +448,10 @@ static Binding bindingFor(int button, Context context)
         case SDL_CONTROLLER_BUTTON_A:
             return act(ACTION_MOUSE_LEFT);
         case SDL_CONTROLLER_BUTTON_X:
+            if (inventoryQuickMoveWindowType() == 0 && inventoryQuantityWindow() == -1
+                && topMenuWindow() == inventoryWindowId()) {
+                return act(ACTION_INV_USE);
+            }
             return act(ACTION_MOUSE_RIGHT);
         case SDL_CONTROLLER_BUTTON_B:
         case SDL_CONTROLLER_BUTTON_START:
@@ -545,6 +551,14 @@ static void bindingPress(int slot, Binding binding)
     case ACTION_MOUSE_RIGHT:
         gMouseRightHeld = true;
         gMouseRightPulse = 2;
+        break;
+    case ACTION_INV_USE:
+        if (inventoryQuickUseRequest()) {
+            gMouseLeftPulse = 2;
+            gInvUseCancelAt = SDL_GetTicks() + 400;
+        } else {
+            gMouseRightPulse = 2;
+        }
         break;
     case ACTION_TARGET_PREV:
         gPendingTargetStep = -1;
@@ -1158,6 +1172,12 @@ void gamepadDebugEmptyWeapon()
     }
 }
 
+void gamepadDebugHurt()
+{
+    critter_adjust_hits(obj_dude, -20);
+    intface_update_hit_points(false);
+}
+
 void gamepadDebugState()
 {
     int mx, my;
@@ -1253,7 +1273,7 @@ void gamepadGetMouseInput(int* dx, int* dy, int* buttons, int* wheelX, int* whee
         if (gPadMode && inventoryType >= 0 && inventoryType < 8 && !tipShown[inventoryType] && !dialog_active()) {
             const char* tip = nullptr;
             if (inventoryType == 0) {
-                tip = "A: impugna o indossa (o rimetti via). X: azioni sull'oggetto.";
+                tip = "A: impugna o indossa (o rimetti via). X: usa (stimpak, cibo...).";
             } else if (inventoryType == 2) {
                 tip = "A: prendi o lascia l'oggetto. B: chiudi.";
             }
@@ -1318,7 +1338,11 @@ void gamepadGetMouseInput(int* dx, int* dy, int* buttons, int* wheelX, int* whee
         if (gMouseLeftHeld || gMouseLeftPulse > 0) {
             *buttons |= MOUSE_STATE_LEFT_BUTTON_DOWN;
         }
-        if (gMouseLeftPulse > 0) gMouseLeftPulse--;
+        if (gInvUseCancelAt != 0 && SDL_GetTicks() >= gInvUseCancelAt) {
+        gInvUseCancelAt = 0;
+        inventoryQuickUseCancel();
+    }
+    if (gMouseLeftPulse > 0) gMouseLeftPulse--;
         return;
     }
 

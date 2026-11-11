@@ -51,6 +51,10 @@ namespace fallout {
 // CE (controlli): tipo della finestra inventario aperta, -1 se nessuna.
 static int gQuickMoveWindowType = -1;
 
+// Controller: X su un oggetto dell'inventario lo usa subito (stimpak, cibo,
+// droghe...) senza aprire il menu azioni.
+static bool gInventoryQuickUse = false;
+
 #define INVENTORY_WINDOW_X 80
 #define INVENTORY_WINDOW_Y 0
 
@@ -3281,8 +3285,11 @@ void inven_action_cursor(int keyCode, int inventoryWindowType)
 
     int itemType = item_get_type(item);
 
+    bool quickUse = gInventoryQuickUse;
+    gInventoryQuickUse = false;
+
     int mouseState;
-    do {
+    if (!quickUse) do {
         sharedFpsLimiter.mark();
 
         get_input();
@@ -3306,7 +3313,9 @@ void inven_action_cursor(int keyCode, int inventoryWindowType)
         sharedFpsLimiter.throttle();
     } while ((mouseState & MOUSE_EVENT_LEFT_BUTTON_DOWN_REPEAT) != MOUSE_EVENT_LEFT_BUTTON_DOWN_REPEAT);
 
-    inven_set_mouse(INVENTORY_WINDOW_CURSOR_BLANK);
+    if (!quickUse) {
+        inven_set_mouse(INVENTORY_WINDOW_CURSOR_BLANK);
+    }
 
     unsigned char* windowBuffer = win_get_buf(i_wid);
 
@@ -3359,6 +3368,24 @@ void inven_action_cursor(int keyCode, int inventoryWindowType)
         }
     }
 
+    int menuItemIndex = 0;
+    if (quickUse) {
+        // Niente menu: "usa" se c'è, altrimenti esamina.
+        int useIndex = -1;
+        for (int index = 0; index < actionMenuItemsLength; index++) {
+            if (actionMenuItems[index] == GAME_MOUSE_ACTION_MENU_ITEM_USE) {
+                useIndex = index;
+            }
+        }
+        if (useIndex == -1) {
+            inven_obj_examine_func(stack[0], item);
+            inven_set_mouse(INVENTORY_WINDOW_CURSOR_HAND);
+            win_draw(i_wid);
+            return;
+        }
+        menuItemIndex = useIndex;
+    } else {
+
     InventoryWindowDescription* windowDescription = &(iscr_data[inventoryWindowType]);
 
     Rect windowRect;
@@ -3402,7 +3429,6 @@ void inven_action_cursor(int keyCode, int inventoryWindowType)
         BUTTON_FLAG_TRANSPARENT);
     win_draw_rect(i_wid, &rect);
 
-    int menuItemIndex = 0;
     int previousMouseY = y;
     while ((mouse_get_buttons() & MOUSE_EVENT_LEFT_BUTTON_UP) == 0) {
         sharedFpsLimiter.mark();
@@ -3458,6 +3484,7 @@ void inven_action_cursor(int keyCode, int inventoryWindowType)
     }
 
     mouse_set_position(x, y);
+    }
 
     display_inventory(stack_offset[curr_stack], -1, inventoryWindowType);
 
@@ -3589,7 +3616,7 @@ void inven_action_cursor(int keyCode, int inventoryWindowType)
         break;
     }
 
-    inven_set_mouse(INVENTORY_WINDOW_CURSOR_ARROW);
+    inven_set_mouse(quickUse ? INVENTORY_WINDOW_CURSOR_HAND : INVENTORY_WINDOW_CURSOR_ARROW);
 
     if (inventoryWindowType == INVENTORY_WINDOW_TYPE_NORMAL && actionMenuItem != GAME_MOUSE_ACTION_MENU_ITEM_LOOK) {
         display_stats();
@@ -5419,6 +5446,32 @@ int inventoryQuickMoveWindowType()
 // dalla lista alla mano attiva (o all'armatura), dagli slot alla lista, nel
 // bottino e nel baratto da una colonna all'altra. Con il controller un tocco
 // di A fa quel trascinamento da solo.
+int inventoryWindowId()
+{
+    return gQuickMoveWindowType != -1 ? i_wid : -1;
+}
+
+bool inventoryQuickUseRequest()
+{
+    if (gQuickMoveWindowType != INVENTORY_WINDOW_TYPE_NORMAL || immode != INVENTORY_WINDOW_CURSOR_HAND) {
+        return false;
+    }
+    gInventoryQuickUse = true;
+    inven_set_mouse(INVENTORY_WINDOW_CURSOR_ARROW);
+    return true;
+}
+
+void inventoryQuickUseCancel()
+{
+    if (!gInventoryQuickUse) {
+        return;
+    }
+    gInventoryQuickUse = false;
+    if (gQuickMoveWindowType != -1 && immode == INVENTORY_WINDOW_CURSOR_ARROW) {
+        inven_set_mouse(INVENTORY_WINDOW_CURSOR_HAND);
+    }
+}
+
 bool inventoryQuickMoveTarget(int topWindow, int* outX, int* outY)
 {
     if (gQuickMoveWindowType == -1 || topWindow != i_wid || immode != INVENTORY_WINDOW_CURSOR_HAND) {
