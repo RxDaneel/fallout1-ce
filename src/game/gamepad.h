@@ -31,6 +31,9 @@ void gamepadPointerUsed();
 
 #ifdef FALLOUT_AUTOTEST
 void gamepadDebugDumpNav(const char* name);
+void gamepadDebugEmptyWeapon();
+void gamepadDebugGotoExit();
+void gamepadDebugState();
 #endif
 
 // Impostazioni [mobile] di fallout.cfg.
@@ -45,6 +48,9 @@ bool gamepadSnapPoint(int* x, int* y);
 // Clic intelligente (vedi gamepad.cc). false = non cliccare, è cambiato solo
 // il cursore e serve un secondo tocco per confermare.
 bool gamepadSmartClick(int x, int y);
+
+// L'ultimo input è arrivato dal controller?
+bool gamepadIsPadMode();
 
 // Barra dei comandi: disegna nella vista della mappa (chiamata dove il gioco
 // disegna i testi fluttuanti; rect e buffer in coordinate della finestra).

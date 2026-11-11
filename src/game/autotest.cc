@@ -241,6 +241,12 @@ void autotestTick()
         } else if (strcmp(command, "log") == 0) {
             printf("[autotest] %s\n", line.c_str() + 4);
             fflush(stdout);
+        } else if (strcmp(command, "gotoexit") == 0) {
+            gamepadDebugGotoExit();
+        } else if (strcmp(command, "state") == 0) {
+            gamepadDebugState();
+        } else if (strcmp(command, "noammo") == 0) {
+            gamepadDebugEmptyWeapon();
         } else if (strcmp(command, "quit") == 0) {
             printf("[autotest] fine\n");
             fflush(stdout);

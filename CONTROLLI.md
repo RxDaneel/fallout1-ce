@@ -121,3 +121,13 @@ button_hints=1            ; 1 = barra con i tasti da premere sopra il pannello, 
 
 In f1_res.ini / f2_res.ini, sezione `[IFACE]`, `IFACE_BAR_MODE=1` fa continuare la mappa
 dietro il pannello: niente zone nere ai lati sugli schermi larghi (l'installer lo attiva da solo).
+
+## Scorciatoie del controller
+
+- **Inventario, bottino, baratto**: un tocco di A sposta l'oggetto dove serve
+  (in mano o addosso, di nuovo nello zaino, da una colonna all'altra). Con più
+  pezzi si apre "Sposta oggetti" già su "tutto": un altro A conferma.
+- **Combattimento**: al tuo turno il mirino va da solo sul nemico più vicino
+  che ti sta attaccando; con l'arma scarica A ricarica.
+- **Esplorazione**: la barra avvisa se la casella scelta non è raggiungibile
+  ("Da qui non ci arrivi") o se è un'uscita ("Esci dalla zona").

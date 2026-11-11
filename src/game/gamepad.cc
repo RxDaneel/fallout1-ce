@@ -67,6 +67,10 @@ struct MobileSettings {
 static MobileSettings gMobile;
 
 static void hintsAfterScroll();
+extern bool gHintVisible;
+extern std::string gHintKey;
+static bool hexModeActive();
+static bool gHexShown = false; // esplorazione: esagono di arrivo visibile
 
 static void mobileSettingsLoad()
 {
@@ -144,6 +148,16 @@ static Sint16 gAxis[SDL_CONTROLLER_AXIS_MAX];
 static Binding gActiveBinding[SDL_CONTROLLER_BUTTON_MAX];
 
 static bool gMouseLeftHeld = false;
+
+// Tocco di A su un oggetto dell'inventario: il trascinamento verso la sua
+// destinazione naturale lo fa il controller (vedi inventoryQuickMoveTarget).
+static Uint32 gLeftPressedAt = 0;
+static bool gLeftMovedSincePress = false;
+static int gLeftDownPolls = 0; // letture dell'input con il tasto giù
+static bool gQuickDropPending = false;
+static int gQuickDropX = 0;
+static int gQuickDropY = 0;
+static Uint32 gQuickDropUntil = 0; // tasto tenuto giù sulla destinazione fino a qui
 static bool gMouseRightHeld = false;
 static int gMouseRightPulse = 0;
 static int gMouseLeftPulse = 0;
@@ -207,6 +221,7 @@ static int gNavPendingY = 0;
 static Uint32 gNavNextRepeat = 0;
 static int gNavWin = -1; // pulsante selezionato
 static int gNavBtn = -1;
+static Rect gNavRect; // dov'era il pulsante scelto (gli id vengono riusati)
 static int gWheelPending = 0;
 static int gLastContext = -1;
 static Uint32 gNavAutoSelectAt = 0;
@@ -481,6 +496,9 @@ static Binding triggerBindingFor(bool right, Context context)
 static void dialogStep(int step);
 static bool mapIsActive();
 
+static bool gPendingReload = false;
+static bool combatWeaponNeedsReload();
+
 static void bindingPress(int slot, Binding binding)
 {
     gActiveBinding[slot] = binding;
@@ -499,6 +517,11 @@ static void bindingPress(int slot, Binding binding)
             // bersaglio (LB/RB) o l'esagono (stick) li hai già scelti.
             if (gmouse_3d_get_mode() == GAME_MOUSE_MODE_MOVE) {
                 gCombatHex = -1;
+            } else if (combatWeaponNeedsReload()) {
+                // Arma scarica e munizioni in tasca: A ricarica.
+                gPendingReload = true;
+                gActiveBinding[slot].action = ACTION_NONE;
+                break;
             }
         } else if (mapIsActive()) {
             int mouseX;
@@ -515,6 +538,9 @@ static void bindingPress(int slot, Binding binding)
         }
         gMouseLeftHeld = true;
         gMouseLeftPulse = 2;
+        gLeftPressedAt = SDL_GetTicks();
+        gLeftMovedSincePress = false;
+        gLeftDownPolls = 0;
         break;
     case ACTION_MOUSE_RIGHT:
         gMouseRightHeld = true;
@@ -576,6 +602,19 @@ static void bindingRelease(int slot)
         break;
     case ACTION_MOUSE_LEFT:
         gMouseLeftHeld = false;
+#ifdef FALLOUT_AUTOTEST
+        {
+            int tx = -1, ty = -1, mx, my;
+            mouse_get_position(&mx, &my);
+            bool ok = inventoryQuickMoveTarget(topMenuWindow(), &tx, &ty);
+            printf("[pad] rilascio A: mouse %d,%d tipo %d top %d moved %d dt %u ctx %d -> %d (%d,%d)\n", mx, my, inventoryQuickMoveWindowType(), topMenuWindow(), gLeftMovedSincePress, SDL_GetTicks() - gLeftPressedAt, currentContext(), ok, tx, ty);
+        }
+#endif
+        if (gPadMode && !gLeftMovedSincePress && SDL_GetTicks() - gLeftPressedAt < 400
+            && (currentContext() == CONTEXT_WINDOW || currentContext() == CONTEXT_DIALOG)
+            && inventoryQuickMoveTarget(topMenuWindow(), &gQuickDropX, &gQuickDropY)) {
+            gQuickDropPending = true;
+        }
         break;
     case ACTION_MOUSE_RIGHT:
         gMouseRightHeld = false;
@@ -834,6 +873,38 @@ static int navDefault(const std::vector<NavTarget>& targets, int mouseX, int mou
         }
     }
 
+    // Inventario, bottino, baratto: si parte dalla prima casella della tua
+    // lista.
+    int homeX;
+    int homeY;
+    if (inventoryQuantityWindow() == -1 && inventoryQuickMoveHome(&homeX, &homeY)) {
+        for (size_t i = 0; i < targets.size(); i++) {
+            const Rect& r = targets[i].rect;
+            if (homeX >= r.ulx && homeX <= r.lrx && homeY >= r.uly && homeY <= r.lry) {
+                return (int)i;
+            }
+        }
+    }
+
+    // "Sposta oggetti": si parte da FATTO (in basso a sinistra), così dopo il
+    // tocco sull'oggetto basta un altro A per confermare.
+    int quantityWindow = inventoryQuantityWindow();
+    if (quantityWindow != -1) {
+        int found = -1;
+        for (size_t i = 0; i < targets.size(); i++) {
+            if (targets[i].win != quantityWindow) {
+                continue;
+            }
+            if (found == -1 || targets[i].rect.uly > targets[found].rect.uly + 4
+                || (abs(targets[i].rect.uly - targets[found].rect.uly) <= 4 && targets[i].rect.ulx < targets[found].rect.ulx)) {
+                found = (int)i;
+            }
+        }
+        if (found != -1) {
+            return found;
+        }
+    }
+
     for (size_t i = 0; i < targets.size(); i++) {
         const Rect& r = targets[i].rect;
         if (mouseX >= r.ulx && mouseX <= r.lrx && mouseY >= r.uly && mouseY <= r.lry) {
@@ -863,42 +934,58 @@ static int navStep(const std::vector<NavTarget>& targets, int current, int dirX,
     navCenter(targets[current], &cx, &cy);
     const Rect& cr = targets[current].rect;
 
-    int best = -1;
-    double bestScore = 1e18;
-    for (size_t i = 0; i < targets.size(); i++) {
-        if ((int)i == current) {
-            continue;
-        }
-        const Rect& r = targets[i].rect;
-        int x;
-        int y;
-        navCenter(targets[i], &x, &y);
+    // Prima passata: solo i pulsanti il cui centro sta davvero oltre il bordo
+    // di quello attuale (da una riga larga non si "salta" a un'area sopra o
+    // sotto che è solo un po' spostata). Seconda passata: la regola larga.
+    for (int pass = 0; pass < 2; pass++) {
+        int best = -1;
+        double bestScore = 1e18;
+        for (size_t i = 0; i < targets.size(); i++) {
+            if ((int)i == current) {
+                continue;
+            }
+            const Rect& r = targets[i].rect;
+            int x;
+            int y;
+            navCenter(targets[i], &x, &y);
 
-        double along;
-        double side;
-        if (dirX != 0) {
-            // Deve stare davvero da quella parte (oltre il bordo del pulsante
-            // attuale, con un po' di tolleranza).
-            if (dirX > 0 && r.ulx <= cr.ulx + 2) continue;
-            if (dirX < 0 && r.lrx >= cr.lrx - 2) continue;
-            along = fabs((double)(x - cx));
-            // Sovrapposizione verticale: stessa riga = nessuna penalità.
-            bool overlap = r.uly <= cr.lry && r.lry >= cr.uly;
-            side = overlap ? 0.0 : fabs((double)(y - cy));
-        } else {
-            if (dirY > 0 && r.uly <= cr.uly + 2) continue;
-            if (dirY < 0 && r.lry >= cr.lry - 2) continue;
-            along = fabs((double)(y - cy));
-            bool overlap = r.ulx <= cr.lrx && r.lrx >= cr.ulx;
-            side = overlap ? 0.0 : fabs((double)(x - cx));
+            double along;
+            double side;
+            if (dirX != 0) {
+                if (pass == 0) {
+                    if (dirX > 0 && x <= cr.lrx) continue;
+                    if (dirX < 0 && x >= cr.ulx) continue;
+                } else {
+                    if (dirX > 0 && r.ulx <= cr.ulx + 2) continue;
+                    if (dirX < 0 && r.lrx >= cr.lrx - 2) continue;
+                }
+                along = fabs((double)(x - cx));
+                // Sovrapposizione verticale: stessa riga = nessuna penalità.
+                bool overlap = r.uly <= cr.lry && r.lry >= cr.uly;
+                side = overlap ? 0.0 : fabs((double)(y - cy));
+            } else {
+                if (pass == 0) {
+                    if (dirY > 0 && y <= cr.lry) continue;
+                    if (dirY < 0 && y >= cr.uly) continue;
+                } else {
+                    if (dirY > 0 && r.uly <= cr.uly + 2) continue;
+                    if (dirY < 0 && r.lry >= cr.lry - 2) continue;
+                }
+                along = fabs((double)(y - cy));
+                bool overlap = r.ulx <= cr.lrx && r.lrx >= cr.ulx;
+                side = overlap ? 0.0 : fabs((double)(x - cx));
+            }
+            double score = along + side * 3.0;
+            if (score < bestScore) {
+                bestScore = score;
+                best = (int)i;
+            }
         }
-        double score = along + side * 3.0;
-        if (score < bestScore) {
-            bestScore = score;
-            best = (int)i;
+        if (best != -1) {
+            return best;
         }
     }
-    return best;
+    return -1;
 }
 
 // Ogni frame nei menu: seleziona un pulsante e sposta lì il cursore.
@@ -950,12 +1037,21 @@ static void navTick(Context context, Uint32 now, int* dx, int* dy)
     }
 
     bool wantJump = gNavPendingX != 0 || gNavPendingY != 0;
+    if (wantJump) {
+        gLeftMovedSincePress = true;
+    }
     bool autoSelect = gNavAutoSelectAt != 0 && now >= gNavAutoSelectAt;
     // Controllo periodico: il cursore resta agganciato al pulsante scelto
     // (il gioco a volte lo sposta quando apre una finestra), e se il pulsante
     // sparisce se ne sceglie un altro.
     static Uint32 nextCheck = 0;
-    bool check = gNavWin != -1 && now >= nextCheck && !gMouseLeftHeld;
+    bool quickDrop = gQuickDropPending || gQuickDropUntil != 0;
+    bool check = gNavWin != -1 && now >= nextCheck && !gMouseLeftHeld && !quickDrop;
+    if (quickDrop) {
+        gNavPendingX = 0;
+        gNavPendingY = 0;
+        return;
+    }
     if (!wantJump && !autoSelect && !check) {
         return;
     }
@@ -975,6 +1071,14 @@ static void navTick(Context context, Uint32 now, int* dx, int* dy)
     mouse_get_position(&mouseX, &mouseY);
 
     int current = navFind(targets, gNavWin, gNavBtn);
+    if (current != -1) {
+        // Finestre e pulsanti chiusi lasciano liberi i loro id: se il
+        // pulsante "ritrovato" sta altrove è un altro pulsante.
+        const Rect& r = targets[current].rect;
+        if (r.ulx != gNavRect.ulx || r.uly != gNavRect.uly || r.lrx != gNavRect.lrx || r.lry != gNavRect.lry) {
+            current = -1;
+        }
+    }
     int next = -1;
 
     // Aree alte (liste di righe, come le abilità o le note del Pip-Boy): su e
@@ -1025,6 +1129,7 @@ static void navTick(Context context, Uint32 now, int* dx, int* dy)
         bool enteringVertically = next != current && current != -1 && lastJumpY != 0;
         gNavWin = targets[next].win;
         gNavBtn = targets[next].btn;
+        gNavRect = targets[next].rect;
         int x;
         int y;
         navCenter(targets[next], &x, &y);
@@ -1041,6 +1146,49 @@ static void navTick(Context context, Uint32 now, int* dx, int* dy)
 }
 
 #ifdef FALLOUT_AUTOTEST
+static Object* activeHandItem();
+
+// Banco di prova: svuota l'arma in mano (per provare la ricarica).
+void gamepadDebugEmptyWeapon()
+{
+    Object* weapon = activeHandItem();
+    if (weapon != nullptr) {
+        item_w_set_curr_ammo(weapon, 0);
+        printf("[pad] arma svuotata\n");
+    }
+}
+
+void gamepadDebugState()
+{
+    int mx, my;
+    mouse_get_position(&mx, &my);
+    printf("[pad] stato: pad %d ctx %d modo %d mouse %d,%d hex %d target %p focus %p menuHold %d uiOff %d hint %d '%s'\n",
+        gPadMode, currentContext(), gmouse_3d_get_mode(), mx, my, gCombatHex, (void*)gTargetCurrent, (void*)gFocus,
+        gMenuHold, game_ui_is_disabled(), gHintVisible, gHintKey.c_str());
+}
+
+// Banco di prova: porta l'esagono sull'uscita dalla mappa più vicina.
+void gamepadDebugGotoExit()
+{
+    int best = -1;
+    int bestDistance = INT_MAX;
+    for (Object* object = obj_find_first_at(map_elevation); object != nullptr; object = obj_find_next_at()) {
+        if (object->pid >= 0x5000010 && object->pid <= 0x5000017) {
+            int distance = tile_dist(obj_dude->tile, object->tile);
+            if (distance < bestDistance && make_path(obj_dude, obj_dude->tile, object->tile, nullptr, 0) > 0) {
+                bestDistance = distance;
+                best = object->tile;
+            }
+        }
+    }
+    printf("[pad] uscita piu' vicina: casella %d a %d passi\n", best, bestDistance);
+    if (best != -1) {
+        gCombatHex = best;
+        gCombatHexOrigin = obj_dude->tile;
+        tile_scroll_to(best, 2);
+    }
+}
+
 void gamepadDebugDumpNav(const char* name)
 {
     std::vector<NavTarget> targets(256);
@@ -1090,6 +1238,34 @@ void gamepadGetMouseInput(int* dx, int* dy, int* buttons, int* wheelX, int* whee
     Context context = currentContext();
     bool pointerless = context == CONTEXT_MAP && gPadMode;
 
+    // Prima volta che apri inventario o bottino col controller: una riga
+    // nella console (resta visibile sotto la finestra) spiega i tasti.
+    static int lastInventoryType = -1;
+    static bool tipShown[8] = {};
+    int inventoryType = inventoryQuickMoveWindowType();
+    if (inventoryType != lastInventoryType) {
+        lastInventoryType = inventoryType;
+        // Finestra inventario appena aperta (o chiusa): la selezione riparte
+        // dal suo punto naturale.
+        gNavWin = -1;
+        gNavBtn = -1;
+        gNavAutoSelectAt = now + 120;
+        if (gPadMode && inventoryType >= 0 && inventoryType < 8 && !tipShown[inventoryType] && !dialog_active()) {
+            const char* tip = nullptr;
+            if (inventoryType == 0) {
+                tip = "A: impugna o indossa (o rimetti via). X: azioni sull'oggetto.";
+            } else if (inventoryType == 2) {
+                tip = "A: prendi o lascia l'oggetto. B: chiudi.";
+            }
+            if (tip != nullptr) {
+                tipShown[inventoryType] = true;
+                char buffer[128];
+                snprintf(buffer, sizeof(buffer), "%s", tip);
+                display_print(buffer);
+            }
+        }
+    }
+
     navTick(context, now, dx, dy);
 
     // Senza puntatore il cursore resta nascosto sulla mappa; ricompare nei
@@ -1101,7 +1277,7 @@ void gamepadGetMouseInput(int* dx, int* dy, int* buttons, int* wheelX, int* whee
     }
     // Nasconde subito anche il cursore "3D" della mappa: altrimenti il gioco
     // farebbe in tempo a scrivere il nome di quello che c'era sotto.
-    if (wantHidden && gmouse_3d_is_on()) {
+    if (wantHidden && gmouse_3d_is_on() && !(hexModeActive() && gHexShown)) {
         gmouse_3d_off();
         gWeHidMapCursor = true;
     }
@@ -1209,10 +1385,31 @@ void gamepadGetMouseInput(int* dx, int* dy, int* buttons, int* wheelX, int* whee
         *dy += moveY;
     }
 
+    // Tocco di A nell'inventario: il tasto resta giù qualche lettura
+    // sull'oggetto (il gioco lo "prende"), poi il cursore salta a destinazione
+    // e lì il tasto viene rilasciato.
+    // (A tempo, non a letture: il gioco legge l'input più volte per frame.)
+    if (gQuickDropUntil != 0 && now >= gQuickDropUntil) {
+        gQuickDropUntil = 0;
+    }
+    if (gQuickDropPending && gLeftDownPolls >= 3 && now - gLeftPressedAt >= 130) {
+        gQuickDropPending = false;
+        gQuickDropUntil = now + 130;
+#ifdef FALLOUT_AUTOTEST
+        printf("[pad] trascinamento automatico verso %d,%d\n", gQuickDropX, gQuickDropY);
+#endif
+        int mouseX;
+        int mouseY;
+        mouse_get_position(&mouseX, &mouseY);
+        *dx = gQuickDropX - mouseX;
+        *dy = gQuickDropY - mouseY;
+    }
+
     // Un clic deve durare almeno un frame anche se il pulsante viene
     // rilasciato prima che il gioco legga l'input.
-    if (gMouseLeftHeld || gMouseLeftPulse > 0) {
+    if (gMouseLeftHeld || gMouseLeftPulse > 0 || gQuickDropPending || gQuickDropUntil != 0) {
         *buttons |= MOUSE_STATE_LEFT_BUTTON_DOWN;
+        gLeftDownPolls++;
     }
     if (gMouseRightHeld || gMouseRightPulse > 0) {
         *buttons |= MOUSE_STATE_RIGHT_BUTTON_DOWN;
@@ -1509,7 +1706,22 @@ static void cycleTarget(int step, bool combat)
     dudeY += 8;
 
     if (combat) {
-        // In combattimento dal più vicino al più lontano.
+        // In combattimento prima chi ce l'ha con te, poi dal più vicino al
+        // più lontano: il primo RB non finisce mai su un passante.
+        auto hostile = [](Object* critter) {
+            return (critter->data.critter.combat.maneuver & CRITTER_MANEUVER_ENGAGING) != 0
+                || critter->data.critter.combat.whoHitMe == obj_dude;
+        };
+        std::sort(candidates.begin(), candidates.end(), [&hostile](const Candidate& a, const Candidate& b) {
+            bool ha = hostile(a.object);
+            bool hb = hostile(b.object);
+            if (ha != hb) {
+                return ha;
+            }
+            return tile_dist(obj_dude->tile, a.object->tile) < tile_dist(obj_dude->tile, b.object->tile);
+        });
+    } else if (hexModeActive()) {
+        // Esplorazione a esagoni: dal più vicino a te al più lontano.
         std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
             return tile_dist(obj_dude->tile, a.object->tile) < tile_dist(obj_dude->tile, b.object->tile);
         });
@@ -1532,7 +1744,7 @@ static void cycleTarget(int step, bool combat)
     }
 
     if (index == -1) {
-        if (combat) {
+        if (combat || (hexModeActive() && gCombatHex == -1)) {
             index = 0;
         } else {
             // Primo aggancio: l'oggetto più vicino al cursore.
@@ -2130,8 +2342,6 @@ static void stickMovementTick()
 // un oggetto, viene evidenziato e A ci interagisce.
 // -----------------------------------------------------------------------------
 
-static bool gHexShown = false;
-
 static Object* objectOnHex(const std::vector<Candidate>& candidates, int hex)
 {
     Object* best = nullptr;
@@ -2279,10 +2489,10 @@ struct HintItem {
 
 static const int kHintHeight = 25;
 static const int kHintPillHeight = 17;
-static std::string gHintKey;
+std::string gHintKey;
 static std::vector<unsigned char> gHintImage;
 static int gHintWidth = 0;
-static bool gHintVisible = false;
+bool gHintVisible = false;
 static Rect gHintRect; // coordinate della finestra della mappa
 
 static unsigned char hintColor(int r, int g, int b)
@@ -2341,6 +2551,72 @@ static std::string hintVerb(Object* object)
     return name;
 }
 
+// Arma della mano attiva (quella che A usa in combattimento).
+static Object* activeHandItem()
+{
+    return (intface_is_item_right_hand() ? HAND_RIGHT : HAND_LEFT) == HAND_LEFT ? inven_left_hand(obj_dude) : inven_right_hand(obj_dude);
+}
+
+// Hai in tasca munizioni adatte a quest'arma?
+static bool hasAmmoFor(Object* weapon)
+{
+    if (weapon == nullptr) {
+        return false;
+    }
+    int index = -1;
+    Object* ammo;
+    while ((ammo = inven_find_type(obj_dude, ITEM_TYPE_AMMO, &index)) != nullptr) {
+        if (item_w_can_reload(weapon, ammo)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// In combattimento, col mirino su un bersaglio, l'arma è scarica ma si può
+// ricaricare: A ricarica invece di fare "clic a vuoto".
+static bool combatWeaponNeedsReload()
+{
+    if (!isInCombat() || gTargetCurrent == nullptr || gmouse_3d_get_mode() != GAME_MOUSE_MODE_CROSSHAIR) {
+        return false;
+    }
+    int hitMode;
+    bool aiming;
+    if (intface_get_attack(&hitMode, &aiming) == -1) {
+        return false;
+    }
+    return combat_check_bad_shot(obj_dude, gTargetCurrent, hitMode, aiming) == COMBAT_BAD_SHOT_NO_AMMO
+        && hasAmmoFor(activeHandItem());
+}
+
+// Casella scelta in esplorazione: ci si arriva? È un'uscita dalla mappa?
+// (Il calcolo del percorso costa: si rifà solo quando cambia qualcosa.)
+static void hexInfo(int hex, bool* reachable, bool* exitGrid)
+{
+    static int cachedFrom = -1;
+    static int cachedHex = -1;
+    static int cachedElevation = -1;
+    static bool cachedReachable = true;
+    static bool cachedExit = false;
+
+    if (hex != cachedHex || obj_dude->tile != cachedFrom || map_elevation != cachedElevation) {
+        cachedHex = hex;
+        cachedFrom = obj_dude->tile;
+        cachedElevation = map_elevation;
+        cachedReachable = make_path(obj_dude, obj_dude->tile, hex, nullptr, 0) > 0;
+        cachedExit = false;
+        for (Object* object = obj_find_first_at(map_elevation); object != nullptr; object = obj_find_next_at()) {
+            if (object->tile == hex && object->pid >= 0x5000010 && object->pid <= 0x5000017) {
+                cachedExit = true;
+                break;
+            }
+        }
+    }
+
+    *reachable = cachedReachable;
+    *exitGrid = cachedExit;
+}
+
 static void hintsCollect(std::vector<HintItem>& items, bool isInCombatMode)
 {
     if (!gMobile.buttonHints || !gPadMode || gMenuHold || game_ui_is_disabled()) {
@@ -2373,6 +2649,19 @@ static void hintsCollect(std::vector<HintItem>& items, bool isInCombatMode)
     }
 
     if (isInCombatMode) {
+        if (gTargetCurrent != nullptr) {
+            bool found = false;
+            for (Object* object = obj_find_first_at(map_elevation); object != nullptr; object = obj_find_next_at()) {
+                if (object == gTargetCurrent) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found || critter_is_dead(gTargetCurrent)) {
+                gTargetCurrent = nullptr;
+            }
+        }
+
         // Arma nella mano attiva (quella che spara/colpisce con A) e nell'altra.
         bool leftActive = (intface_is_item_right_hand() ? HAND_RIGHT : HAND_LEFT) == HAND_LEFT;
         Object* weapon = leftActive ? inven_left_hand(obj_dude) : inven_right_hand(obj_dude);
@@ -2394,7 +2683,12 @@ static void hintsCollect(std::vector<HintItem>& items, bool isInCombatMode)
                 text = isWeapon(weapon) ? name + " e' fuori portata" : "Troppo lontano per le mani nude";
                 break;
             case COMBAT_BAD_SHOT_NO_AMMO:
-                text = "Arma scarica: ricarica dall'inventario (Y)";
+                if (hasAmmoFor(weapon)) {
+                    int reloadMode = leftActive ? HIT_MODE_LEFT_WEAPON_RELOAD : HIT_MODE_RIGHT_WEAPON_RELOAD;
+                    text = "Ricarica (" + std::to_string(item_mp_cost(obj_dude, reloadMode, false)) + " PA)";
+                } else {
+                    text = "Arma scarica: niente munizioni";
+                }
                 break;
             case COMBAT_BAD_SHOT_NOT_ENOUGH_AP:
                 text = "PA insufficienti: chiudi il turno";
@@ -2425,7 +2719,16 @@ static void hintsCollect(std::vector<HintItem>& items, bool isInCombatMode)
 
     if (focus == nullptr) {
         if (hexModeActive() && gCombatHex != -1 && gCombatHex != obj_dude->tile) {
-            items.push_back({ "A", tile_dist(obj_dude->tile, gCombatHex) > 4 ? "Corri qui" : "Vai qui" });
+            bool reachable;
+            bool exitGrid;
+            hexInfo(gCombatHex, &reachable, &exitGrid);
+            if (!reachable) {
+                items.push_back({ "A", "Da qui non ci arrivi" });
+            } else if (exitGrid) {
+                items.push_back({ "A", "Esci dalla zona" });
+            } else {
+                items.push_back({ "A", tile_dist(obj_dude->tile, gCombatHex) > 4 ? "Corri qui" : "Vai qui" });
+            }
             items.push_back({ "RB", "Oggetti vicini" });
             items.push_back({ "B", "Annulla" });
         }
@@ -2574,15 +2877,23 @@ static void hintsAfterScroll()
         return;
     }
     Rect area = gHintRect;
-    area.ulx -= 40;
-    area.uly -= 40;
-    area.lrx += 40;
-    area.lry += 40;
+    area.ulx -= 80;
+    area.uly -= 60;
+    area.lrx += 80;
+    area.lry += 60;
     tile_refresh_rect(&area, map_elevation);
 }
 
 static void hintsTick(bool isInCombatMode)
 {
+    // Anche il gioco sposta la visuale per conto suo (inizio combattimento,
+    // script): qualunque scorrimento trascina con sé i pixel della barra.
+    static int lastCenter = -1;
+    if (tile_center_tile != lastCenter) {
+        lastCenter = tile_center_tile;
+        hintsAfterScroll();
+    }
+
     std::vector<HintItem> items;
     hintsCollect(items, isInCombatMode);
 
@@ -2664,6 +2975,11 @@ void gamepadHintsRender(Rect* rect, unsigned char* buffer, int pitch)
     }
 }
 
+bool gamepadIsPadMode()
+{
+    return gController != nullptr && gPadMode;
+}
+
 void gamepadPointerUsed()
 {
     if (gPadMode) {
@@ -2710,9 +3026,54 @@ void gamepadGameTick(bool isInCombatMode)
             gPadMode = true;
         }
     }
+    if (!wasInCombat && isInCombatMode && gPadMode) {
+        // Inizio combattimento: via l'esagono e la selezione dell'esplorazione;
+        // il cursore riparte da te in modalità movimento (poi, al tuo turno,
+        // il mirino va da solo sul nemico più vicino).
+        gCombatHex = -1;
+        gCombatHexOrigin = -1;
+        gCombatStickActive = false;
+        gTargetCurrent = nullptr;
+        // Il personaggio deve essere in vista (poteva essere in corsa verso
+        // un esagono lontano, con la visuale ancora là).
+        Rect view;
+        int dudeX;
+        int dudeY;
+        hexCenter(obj_dude->tile, &dudeX, &dudeY);
+        if (isoVisibleRect(&view)
+            && (dudeX < view.ulx + 60 || dudeX > view.lrx - 60 || dudeY < view.uly + 60 || dudeY > view.lry - 50)) {
+            tile_scroll_to(obj_dude->tile, 2);
+        }
+        if (gPendingAttackTarget == nullptr) {
+            gmouse_3d_set_mode(GAME_MOUSE_MODE_MOVE);
+            gWarpPending = true;
+            hexCenter(obj_dude->tile, &gWarpX, &gWarpY);
+        }
+    }
     wasInCombat = isInCombatMode;
 
+    static int lastMap = -1;
+    static int lastElevation = -1;
+    if (map_get_index_number() != lastMap || map_elevation != lastElevation) {
+        lastMap = map_get_index_number();
+        lastElevation = map_elevation;
+        gCombatHex = -1;
+        gCombatHexOrigin = -1;
+        gTargetCurrent = nullptr;
+        gPendingAttackTarget = nullptr;
+        gFocusOutlined = false;
+        focusClear(false);
+    }
+
     bool pointerless = gPadMode && !isInCombatMode;
+
+    // A con l'arma scarica: ricarica (vedi la barra dei comandi).
+    if (gPendingReload) {
+        gPendingReload = false;
+        if (isInCombatMode && !game_ui_is_disabled()) {
+            interfaceReloadActiveWeapon();
+        }
+    }
 
     if (gPendingCancelMode) {
         gPendingCancelMode = false;
@@ -2765,6 +3126,54 @@ void gamepadGameTick(bool isInCombatMode)
             }
         }
         cameraStickTick();
+    }
+
+    // Inizio del tuo turno: il mirino va da solo sul nemico più vicino tra
+    // quelli che ce l'hanno con te (mai su chi non ti sta attaccando).
+    static bool autoTargetDone = false;
+    if (!isInCombatMode || game_ui_is_disabled()) {
+        autoTargetDone = false;
+    } else if (!autoTargetDone && gPadMode) {
+        autoTargetDone = true;
+        std::vector<Candidate> candidates;
+        collectCandidates(candidates, true);
+        // Il bersaglio del turno prima resta, se è ancora in piedi e in vista
+        // (il mirino lo segue dove si è spostato).
+        bool keep = false;
+        for (const Candidate& candidate : candidates) {
+            if (candidate.object == gTargetCurrent) {
+                keep = true;
+                break;
+            }
+        }
+        if (!keep) {
+            gTargetCurrent = nullptr;
+        }
+        if (keep && gPendingAttackTarget == nullptr) {
+            gCombatHex = -1;
+            gWarpPending = true;
+            objectAimPoint(gTargetCurrent, &gWarpX, &gWarpY);
+            gmouse_3d_set_mode(GAME_MOUSE_MODE_CROSSHAIR);
+        } else if (gPendingAttackTarget == nullptr && gCombatHex == -1) {
+            Object* nearest = nullptr;
+            int nearestDistance = INT_MAX;
+            for (const Candidate& candidate : candidates) {
+                Object* critter = candidate.object;
+                bool hostile = (critter->data.critter.combat.maneuver & CRITTER_MANEUVER_ENGAGING) != 0
+                    || critter->data.critter.combat.whoHitMe == obj_dude;
+                int distance = tile_dist(obj_dude->tile, critter->tile);
+                if (hostile && distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearest = critter;
+                }
+            }
+            if (nearest != nullptr) {
+                gTargetCurrent = nearest;
+                gWarpPending = true;
+                objectAimPoint(nearest, &gWarpX, &gWarpY);
+                gmouse_3d_set_mode(GAME_MOUSE_MODE_CROSSHAIR);
+            }
+        }
     }
 
     if (gPendingAttackTarget != nullptr) {

@@ -2636,4 +2636,50 @@ bool interfaceMouseClickInIsoView()
     return true;
 }
 
+// CE (controlli): ricarica l'arma della mano attiva senza passare dal ciclo
+// delle modalità. In combattimento paga i punti azione.
+// 0 = ricaricata, -1 = niente da ricaricare, -2 = PA insufficienti.
+int interfaceReloadActiveWeapon()
+{
+    if (interfaceWindow == -1) {
+        return -1;
+    }
+
+    InterfaceItemState* ptr = &(itemButtonItems[itemCurrentItem]);
+    if (ptr->isWeapon == 0 || ptr->item == NULL) {
+        return -1;
+    }
+
+    int cost = 0;
+    if (isInCombat()) {
+        int hitMode = itemCurrentItem == HAND_LEFT
+            ? HIT_MODE_LEFT_WEAPON_RELOAD
+            : HIT_MODE_RIGHT_WEAPON_RELOAD;
+        cost = item_mp_cost(obj_dude, hitMode, false);
+        if (cost > obj_dude->data.critter.combat.ap) {
+            return -2;
+        }
+    }
+
+    bool reloaded = false;
+    while (item_w_try_reload(obj_dude, ptr->item) != -1) {
+        reloaded = true;
+    }
+    if (!reloaded) {
+        return -1;
+    }
+
+    if (isInCombat()) {
+        obj_dude->data.critter.combat.ap -= cost;
+        intface_update_move_points(obj_dude->data.critter.combat.ap, combat_free_move);
+    }
+
+    intface_update_items(false);
+
+    const char* sfx = gsnd_build_weapon_sfx_name(WEAPON_SOUND_EFFECT_READY, ptr->item, HIT_MODE_RIGHT_WEAPON_PRIMARY, NULL);
+    gsound_play_sfx_file(sfx);
+
+    return 0;
+}
+
 } // namespace fallout

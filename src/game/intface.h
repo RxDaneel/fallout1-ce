@@ -68,6 +68,9 @@ int refresh_box_bar_win();
 bool enable_box_bar_win();
 bool disable_box_bar_win();
 
+// CE (controlli): ricarica diretta dell'arma attiva.
+int interfaceReloadActiveWeapon();
+
 } // namespace fallout
 
 #endif /* FALLOUT_GAME_INTFACE_H_ */

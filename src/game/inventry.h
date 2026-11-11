@@ -91,6 +91,13 @@ int drop_ammo_into_weapon(Object* weapon, Object* ammo, Object** a3, int quantit
 void draw_amount(int value, int inventoryWindowType);
 int inven_set_timer(Object* a1);
 
+// CE (controlli): vedi inventoryQuickMoveTarget in inventry.cc.
+int inventoryQuickMoveWindowType();
+// (topWindow: la finestra visibile più in alto, deve essere quella dell'inventario)
+bool inventoryQuickMoveTarget(int topWindow, int* outX, int* outY);
+int inventoryQuantityWindow();
+bool inventoryQuickMoveHome(int* outX, int* outY);
+
 } // namespace fallout
 
 #endif /* FALLOUT_GAME_INVENTRY_H_ */
