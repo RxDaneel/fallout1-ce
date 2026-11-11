@@ -1058,7 +1058,7 @@ static void navTick(Context context, Uint32 now, int* dx, int* dy)
     nextCheck = now + 150;
 
     std::vector<NavTarget> targets(256);
-    int count = windowManagerGetNavTargets(targets.data(), (int)targets.size(), display_win, interfaceWindow);
+    int count = (gNavFullWindowAllowed = gameDialogOptionsWindow(), windowManagerGetNavTargets)(targets.data(), (int)targets.size(), display_win, interfaceWindow);
     targets.resize(count);
     if (count == 0) {
         gNavPendingX = 0;
@@ -1192,7 +1192,7 @@ void gamepadDebugGotoExit()
 void gamepadDebugDumpNav(const char* name)
 {
     std::vector<NavTarget> targets(256);
-    int count = windowManagerGetNavTargets(targets.data(), (int)targets.size(), display_win, interfaceWindow);
+    int count = (gNavFullWindowAllowed = gameDialogOptionsWindow(), windowManagerGetNavTargets)(targets.data(), (int)targets.size(), display_win, interfaceWindow);
     const char* dir = getenv("FALLOUT_SHOTS");
     std::string path = std::string(dir != nullptr ? dir : ".") + "/" + name + ".nav";
     FILE* stream = fopen(path.c_str(), "wt");

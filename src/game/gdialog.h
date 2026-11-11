@@ -24,6 +24,7 @@ bool dialog_active();
 
 #define DIALOG_TARGETS_MAX 16
 int gameDialogGetOptionTargets(int* xs, int* ys, int max);
+int gameDialogOptionsWindow();
 void gdialog_enter(Object* target, int a2);
 void dialogue_system_enter();
 void gdialog_setup_speech(const char* audioFileName);

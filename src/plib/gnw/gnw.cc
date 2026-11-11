@@ -1333,6 +1333,8 @@ bool GNWSystemError(const char* text)
 // Controller: pulsanti attivi e visibili, in coordinate schermo, per la
 // navigazione con la croce. Esclude le finestre indicate (mappa, barra) e i
 // pulsanti coperti da altre finestre.
+int gNavFullWindowAllowed = -1;
+
 int windowManagerGetNavTargets(NavTarget* targets, int max, int excludeWin1, int excludeWin2)
 {
     int count = 0;
@@ -1358,7 +1360,9 @@ int windowManagerGetNavTargets(NavTarget* targets, int max, int excludeWin1, int
 
             // Pulsanti grandi come tutta la finestra: servono a catturare i
             // clic, non sono comandi.
-            if (width >= windowWidth * 9 / 10 && height >= windowHeight * 9 / 10) {
+            // (Tranne nella finestra indicata: es. una sola risposta in un
+            // dialogo occupa tutta la sua finestra ma è un comando vero.)
+            if (width >= windowWidth * 9 / 10 && height >= windowHeight * 9 / 10 && w->id != gNavFullWindowAllowed) {
                 continue;
             }
 
