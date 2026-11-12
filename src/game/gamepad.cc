@@ -1805,6 +1805,14 @@ static void cycleTarget(int step, bool combat)
 // Modalità senza puntatore: oggetto evidenziato
 // -----------------------------------------------------------------------------
 
+// Persone (uomini, donne, bambini, mutanti, ghoul): senza dialogo A le
+// esamina e basta, così in città non parte mai un combattimento per sbaglio.
+static bool critterIsPerson(Object* critter)
+{
+    int killType = critter_kill_count_type(critter);
+    return killType >= KILL_TYPE_MAN && killType <= KILL_TYPE_GHOUL;
+}
+
 // Si può parlare davvero solo con chi ha un dialogo nel suo script: per il
 // gioco ogni creatura "può parlare", anche un ratto.
 static bool critterCanTalk(Object* critter)
@@ -1816,15 +1824,13 @@ static bool critterCanTalk(Object* critter)
     if (scr_ptr(critter->sid, &script) == -1) {
         return false;
     }
+    // Dopo aver caricato un salvataggio lo script non è ancora in memoria e
+    // la tabella delle procedure è vuota finché non gira la prima volta: lì
+    // vale la regola generale (con le persone si parla, con gli animali no).
+    if (script->program == nullptr) {
+        return critterIsPerson(critter);
+    }
     return script->procs[SCRIPT_PROC_TALK] != SCRIPT_PROC_NO_PROC;
-}
-
-// Persone (uomini, donne, bambini, mutanti, ghoul): senza dialogo A le
-// esamina e basta, così in città non parte mai un combattimento per sbaglio.
-static bool critterIsPerson(Object* critter)
-{
-    int killType = critter_kill_count_type(critter);
-    return killType >= KILL_TYPE_MAN && killType <= KILL_TYPE_GHOUL;
 }
 
 // A su una creatura con cui non si parla: parte il combattimento con lei già
